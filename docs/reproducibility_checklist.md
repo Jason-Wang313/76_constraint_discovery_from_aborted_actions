@@ -1,19 +1,15 @@
 # Reproducibility Checklist
 
-## What Reproduces
-- [x] `python src/run_experiment.py`
-- [x] `results/metrics.csv`
-- [x] `results/raw_seed_metrics.csv`
-- [x] `results/ablation_metrics.csv`
-- [x] `results/stress_sweep.csv`
-- [x] `results/negative_cases.csv`
-- [x] `paper/main.tex`
-- [x] Canonical PDF: `C:/Users/wangz/Downloads/76.pdf`
+- Code entry point: `python -m src.run_experiment`.
+- Main phase: set `PAPER76_PHASE=main`.
+- Ablation phase: set `PAPER76_PHASE=ablation`.
+- Stress phase: set `PAPER76_PHASE=stress`.
+- Finalization phase: set `PAPER76_PHASE=finalize`.
+- Resume support: set `PAPER76_RESUME=1` after an interrupted phase.
+- Seed chunking support: set `PAPER76_ONLY_SEEDS=0` or another comma-separated seed list.
+- Stress-level chunking support: set `PAPER76_STRESS_LEVELS=0.40` or another comma-separated level list.
+- Raw outputs: `results/rollouts.csv`, `results/abort_evidence.csv`, `results/stress_sweep_raw.csv`, `results/ablation_rollouts.csv`.
+- Summary outputs: `results/metrics.csv`, `results/pairwise_stats.csv`, `results/ablation_metrics.csv`, `results/stress_sweep.csv`, `results/summary.txt`.
+- Figures: `figures/constraint_discovery_final_success.png`, `figures/constraint_discovery_boundary_f1.png`, `figures/constraint_discovery_ablation_success.png`, `figures/constraint_discovery_stress_sweep.png`.
 
-## What Does Not Reproduce
-- [ ] Real robot results.
-- [ ] High-fidelity benchmark runs.
-- [ ] Trained WAM checkpoints.
-- [ ] Competing learned baselines.
-
-This is reproducible as an archive memo and synthetic stress test, not as an ICLR-main robotics system paper.
+Known environment note: module execution was stable in this rebuild. Prefer `python -m src.run_experiment` over direct `python src/run_experiment.py`.

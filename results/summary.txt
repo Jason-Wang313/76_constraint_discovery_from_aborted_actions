@@ -1,16 +1,21 @@
-Submission-hardening experiment for paper 76 constraint_discovery_from_aborted_actions
-Seven seeds, 600 episodes per seed, strong baselines, ablations, stress sweep, and negative cases.
-observed_only_behavior_clone hidden_mode_shift mean_success=0.4166 ci95=0.0112 tail=0.5834
-observed_only_behavior_clone combined_stress mean_success=0.3264 ci95=0.0124 tail=0.6736
-data_augmentation_wam hidden_mode_shift mean_success=0.5010 ci95=0.0149 tail=0.4990
-data_augmentation_wam combined_stress mean_success=0.4190 ci95=0.0138 tail=0.5810
-scalar_uncertainty_planner hidden_mode_shift mean_success=0.5702 ci95=0.0049 tail=0.4298
-scalar_uncertainty_planner combined_stress mean_success=0.5100 ci95=0.0113 tail=0.4900
-ensemble_disagreement_planner hidden_mode_shift mean_success=0.5874 ci95=0.0054 tail=0.4126
-ensemble_disagreement_planner combined_stress mean_success=0.5553 ci95=0.0112 tail=0.4447
-conformal_risk_filter hidden_mode_shift mean_success=0.6271 ci95=0.0064 tail=0.3729
-conformal_risk_filter combined_stress mean_success=0.5621 ci95=0.0181 tail=0.4379
-proposed_branch_mechanism hidden_mode_shift mean_success=0.6921 ci95=0.0221 tail=0.3079
-proposed_branch_mechanism combined_stress mean_success=0.6640 ci95=0.0137 tail=0.3360
-oracle_branch_upper_bound hidden_mode_shift mean_success=0.7650 ci95=0.0242 tail=0.2350
-oracle_branch_upper_bound combined_stress mean_success=0.7495 ci95=0.0140 tail=0.2505
+Paper 76 constraint_discovery_from_aborted_actions real abort-physics rebuild
+Terminal recommendation: STRONG_REVISE
+Reason: abort_constraint_discovery clears strongest non-oracle baseline constraint_classifier on combined_abort_stress (0.841 vs 0.508 success; paired diff 0.333+/-0.171), reduces repeated aborts by 0.175, improves boundary F1 by 0.052, and does not win by pure conservatism. It still lacks hardware and external benchmark validation, so it is not ICLR-main-ready.
+Main rollout rows: 2205
+Abort evidence rows: 2457
+Seed metric rows: 245
+Ablation rows: 294
+Stress rows: 1050
+Seeds: [0, 1, 2, 3, 4, 5, 6]
+Grid size: 38x38
+Evaluation scenarios per split: 9
+Finalize runtime seconds: 5.31
+
+Combined-abort-stress summary:
+oracle_constraints success=0.85714 ci95=0.06222 abort=0.38095 repeated=0.22222 violation=0.36508 boundary_f1=1.00000 iou=1.00000 efficiency=0.37228 area=0.11663
+abort_constraint_discovery success=0.84127 ci95=0.06476 abort=0.57143 repeated=0.38095 violation=0.55556 boundary_f1=0.44009 iou=0.28427 efficiency=0.25067 area=0.23464
+constraint_classifier success=0.50794 ci95=0.14144 abort=0.60318 repeated=0.55556 violation=0.55556 boundary_f1=0.38829 iou=0.24223 efficiency=0.26263 area=0.25929
+risk_filter_uncertainty success=0.50794 ci95=0.06477 abort=0.79365 repeated=0.71429 violation=0.74603 boundary_f1=0.40621 iou=0.25702 efficiency=0.21277 area=0.15133
+costmap_from_collisions success=0.41270 ci95=0.06222 abort=0.77778 repeated=0.74603 violation=0.76191 boundary_f1=0.41515 iou=0.26379 efficiency=0.20119 area=0.13315
+negative_label_baseline success=0.12698 ci95=0.11072 abort=0.95238 repeated=0.88889 violation=0.95238 boundary_f1=0.24150 iou=0.13792 efficiency=0.12751 area=0.02937
+ignore_aborted_actions success=0.01587 ci95=0.03111 abort=0.98413 repeated=0.98413 violation=0.87302 boundary_f1=0.00000 iou=0.00000 efficiency=0.10816 area=0.00000

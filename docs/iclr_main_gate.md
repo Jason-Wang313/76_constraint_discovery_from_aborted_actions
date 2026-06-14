@@ -1,19 +1,14 @@
 # ICLR Main Gate
 
-Paper: 76 constraint_discovery_from_aborted_actions
+Gate status: STRONG_REVISE.
 
-Existing v2 decision: KILL_ARCHIVE
+The v4 rebuild clears the local empirical gate: the proposed method beats all non-oracle baselines on the decisive `combined_abort_stress` split with seven seeds, paired statistics, ablations, and stress sweeps.
 
-Gate verdict: KILL_ARCHIVE
+It does not clear the ICLR-main submission gate because:
 
-Evidence digest: dfc16205cd8bb776
+- The benchmark is local and diagnostic, not an accepted external robotics benchmark.
+- No real robot experiments are present.
+- The baselines are implemented planning systems, but not large learned robotic policy stacks.
+- The related-work synthesis is still based primarily on the local hostile pool rather than a full manual literature audit.
 
-Fatal blockers:
-- Synthetic-only evidence.
-- Template-generated experiment and writing.
-- No real robot or high-fidelity benchmark.
-- No trained WAM/model checkpoint.
-- No implemented real baselines.
-- No manual exhaustive related-work synthesis.
-
-The only honest main-conference-safe decision is to archive rather than overclaim.
+Required action before submission: external validation plus a stronger manual related-work pass.

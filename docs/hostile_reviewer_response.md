@@ -1,26 +1,21 @@
-        # Hostile Reviewer Response
+# Hostile Reviewer Response
 
-        Paper: 76 Constraint Discovery From Aborted Actions
+## Attack: This is just a costmap from failures.
 
-        ## Strongest Technical Threats
-        - Wasserstein Distributionally Robust Motion Planning and Control with Safety Constraints Using Conditional Value-at-Risk (2020)
-- Time Optimal Planning-Based High-Speed Running Motion Generation for Humanoid Robots with Safety Constraints (2023)
-- Provably-correct stochastic motion planning with safety constraints (2013)
-- Laparoscopic automatic following motion planning of minimally invasive surgery robot based on safety constraints (2022)
-- Learning-Based End-to-End Path Planning for Lunar Rovers with Safety Constraints (2021)
-- A Constraint-based Mission Planning Approach for Reconfigurable Multi-Robot Systems (2018)
-- Collision-Free Motion Planning for Human-Robot Collaborative Safety Under Cartesian Constraint (2018)
-- Identification of physically consistent dynamics parameter of the ABB IRB 360-6/1600 delta robot and its use for time-optimal motion planning under consideration of constraint forces (2024)
+Response: The v4 evidence includes endpoint-negative and costmap baselines. On `combined_abort_stress`, `costmap_from_collisions` reaches 0.413 +/- 0.062 success, while `abort_constraint_discovery` reaches 0.841 +/- 0.065.
 
-        ## ICLR Main Response
-        A hostile ICLR reviewer would be correct to reject this as a main-conference submission. The v2 paper has reproducible synthetic evidence and careful limitations, but it does not contain the real robot, high-fidelity simulator, learned model, or manual related-work depth needed for the ICLR main track.
+## Attack: A conservative risk filter would solve this.
 
-        ## Honest Action
-        The paper is marked `KILL_ARCHIVE`. This avoids converting a generated workshop-style idea into an overstated main-conference claim.
+Response: `risk_filter_uncertainty` reaches 0.508 +/- 0.065 success and repeated abort 0.714. The proposed method reaches 0.841 +/- 0.065 success and repeated abort 0.381.
 
-        ## What Would Be Needed To Revive
-        - Real robot or high-fidelity benchmark experiments.
-        - Implemented model and baselines, not synthetic probability tables.
-        - Manual full-paper related-work audit.
-        - Paper-specific writing and figures.
-        - Evidence that the core mechanism is learned and useful under deployment shift.
+## Attack: A generic classifier over traces is enough.
+
+Response: `constraint_classifier` ties the strongest baseline mean success at 0.508, but remains below the proposed method by a paired 0.333 +/- 0.171 success difference. The classifier also has lower boundary F1.
+
+## Attack: The method wins by becoming over-conservative.
+
+Response: The discovered-area difference versus `constraint_classifier` is -0.025, and path efficiency is only 0.012 lower. Versus `risk_filter_uncertainty`, the proposed method has higher efficiency by 0.038 and higher discovered area by 0.083. It is not simply refusing to move.
+
+## Attack: The paper is still not ICLR-main-ready.
+
+Response: Correct. The decision is `STRONG_REVISE`, not acceptance-ready. The missing pieces are hardware or external benchmark validation and a deeper manual literature synthesis.
