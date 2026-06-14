@@ -1,4 +1,11 @@
-case,expected_behavior,observed_success,lesson
-unmodeled_hardware_damage,planner abstains or requests human inspection,0.18,branch semantics cannot repair missing actuation
-semantic_goal_ambiguity,diagnostic physical probes do not solve language ambiguity,0.31,needs a separate instruction-grounding loop
-adversarial_sensor_dropout,tail-risk objective becomes conservative,0.39,sensor-health modeling is out of scope
+seed,scenario,layout_id,final_abort_reason,evidence_aborts,attempts,boundary_f1,path_efficiency,lesson
+0,4002,combined_abort_stress_0_4002_0,visible_collision,11,5,0.42742,0.05608,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+0,4004,combined_abort_stress_0_4004_0,collision_margin,11,5,0.44920,0.05129,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+1,4008,combined_abort_stress_1_4008_0,unstable_slip,11,5,0.51805,0.02788,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+3,4002,combined_abort_stress_3_4002_0,fixture_snag,11,5,0.43182,0.05610,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+3,4006,combined_abort_stress_3_4006_0,collision_margin,10,5,0.44930,0.06270,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+4,4006,combined_abort_stress_4_4006_0,fixture_snag,10,5,0.57143,0.04463,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+5,4005,combined_abort_stress_5_4005_0,collision_margin,11,5,0.46429,0.05414,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+5,4008,combined_abort_stress_5_4008_0,visible_collision,11,5,0.45263,0.05083,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+6,4000,combined_abort_stress_6_4000_0,collision_margin,10,5,0.44697,0.08910,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+6,4004,combined_abort_stress_6_4004_0,unstable_slip,11,5,0.50075,0.02657,abort-surface inference reduced repeated failures but did not find a safe route for this layout
