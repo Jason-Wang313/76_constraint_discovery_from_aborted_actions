@@ -2,7 +2,7 @@
 
 Paper: 76 constraint_discovery_from_aborted_actions
 
-This v3 pass applies the ICLR main-conference bar. The result is an honest archive decision, not a workshop resubmission.
+This log records the v3 ICLR main-conference archive attack. The later v4 real abort-physics rebuild superseded the v3 local-evidence failure and moved the paper to `STRONG_REVISE`, not ICLR-main-ready.
 
 ## ICLR Main Gate Round 1
 Attack: No real-robot validation.
@@ -191,4 +191,18 @@ Attack: No meaningful recoverable ICLR-main issue remains after archiving.
 
 Verdict: Terminal condition reached.
 
-Action: Mark KILL_ARCHIVE and stop.
+Action: v3 marked `KILL_ARCHIVE`; v4 reopened the idea with real local evidence and moved the current terminal decision to `STRONG_REVISE`.
+
+## Continuation Attack 2026-06-15
+
+The current v4 artifacts were attacked again.
+
+- Code, CSV, BibTeX/PDF, public GitHub, and Downloads-only artifact gates passed.
+- The local positive claim survives: `abort_constraint_discovery` reaches 0.841 +/- 0.065 success on `combined_abort_stress`, while `constraint_classifier` and `risk_filter_uncertainty` each reach 0.508.
+- Paired proposed-minus-classifier success difference is 0.333 +/- 0.171 with 6/7 better seeds.
+- Paired proposed-minus-risk-filter success difference is 0.333 +/- 0.126 with 7/7 better seeds.
+- The result is not pure conservatism: central abstention is 0.000, discovered area is lower than the classifier by 0.025, and path efficiency is higher than the risk filter by 0.038.
+- Stress gate is locally favorable: the proposed method is best non-oracle at every stress level and reaches 0.657 success at stress 1.00.
+- ICLR-main gate still fails because no hardware or external benchmark validation is present.
+
+Updated terminal action: keep `STRONG_REVISE`; do not submit as-is.

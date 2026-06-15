@@ -42,7 +42,7 @@ The implemented methods are:
 \section{Main Results}
 Table~\ref{tab:main} shows the decisive combined-abort-stress split. The proposed method nearly reaches the oracle upper bound and substantially exceeds all non-oracle baselines.
 
-\begin{table}[h]
+\begin{table}[tbp]
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
@@ -65,13 +65,13 @@ Method & Success & Repeated abort & Violation & Boundary F1 & Efficiency \\
 
 The strongest non-oracle mean success is shared by \texttt{constraint\_classifier} and \texttt{risk\_filter\_uncertainty}. Against the classifier, the proposed method has a paired success difference of $0.333 \pm 0.171$, repeated-abort reduction of 0.175, and boundary-F1 improvement of 0.052. Against the risk filter, it has the same success gain, repeated-abort reduction of 0.333, violation reduction of 0.190, boundary-F1 improvement of 0.034, and efficiency improvement of 0.038.
 
-\begin{figure}[h]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=0.95\linewidth]{../figures/constraint_discovery_final_success.png}
 \caption{Combined-abort-stress closed-loop success. Aborted-action constraint discovery beats endpoint, costmap, classifier, and risk-filter baselines.}
 \end{figure}
 
-\begin{figure}[h]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=0.95\linewidth]{../figures/constraint_discovery_boundary_f1.png}
 \caption{Hidden-constraint boundary F1 on the decisive split. The proposed method is not oracle-quality, but it extracts more useful boundary structure than generic trace classification.}
@@ -80,7 +80,7 @@ The strongest non-oracle mean success is shared by \texttt{constraint\_classifie
 \section{Ablations}
 Table~\ref{tab:ablation} shows that the mechanism is not a single endpoint heuristic. Removing partial geometry causes the largest success drop. Removing abort reason labels, repeated-abort memory, safety margins, or dynamic-contact features also hurts.
 
-\begin{table}[h]
+\begin{table}[tbp]
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
@@ -101,7 +101,7 @@ Ablation & Success & Repeated abort & Violation & Boundary F1 \\
 \label{tab:ablation}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=0.90\linewidth]{../figures/constraint_discovery_ablation_success.png}
 \caption{Ablation success. Endpoint-only discovery is not enough; partial geometry and reason labels matter.}
@@ -110,7 +110,7 @@ Ablation & Success & Repeated abort & Violation & Boundary F1 \\
 \section{Stress Sweep}
 Stress sweeps vary hidden-constraint density, abort ambiguity, force/slip difficulty, and observation noise. The proposed method remains above the non-oracle baselines across the sweep, though the oracle gap persists. At stress 1.00, \texttt{abort\_constraint\_discovery} reaches $0.657 \pm 0.204$ success, while \texttt{constraint\_classifier} reaches $0.629 \pm 0.158$ and \texttt{risk\_filter\_uncertainty} reaches $0.486 \pm 0.117$.
 
-\begin{figure}[h]
+\begin{figure}[tbp]
 \centering
 \includegraphics[width=0.90\linewidth]{../figures/constraint_discovery_stress_sweep.png}
 \caption{Stress sweep success. The proposed method is strongest at most levels, but high-stress variance and the oracle gap motivate further validation.}

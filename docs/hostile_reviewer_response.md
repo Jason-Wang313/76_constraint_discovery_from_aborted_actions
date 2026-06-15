@@ -19,3 +19,14 @@ Response: The discovered-area difference versus `constraint_classifier` is -0.02
 ## Attack: The paper is still not ICLR-main-ready.
 
 Response: Correct. The decision is `STRONG_REVISE`, not acceptance-ready. The missing pieces are hardware or external benchmark validation and a deeper manual literature synthesis.
+
+## Continuation Response 2026-06-15
+
+The hostile reviewer does not get to reject the local mechanism outright, but they still get to block ICLR-main submission.
+
+- Local mechanism evidence survives: `abort_constraint_discovery` reaches 0.841 +/- 0.065 success versus 0.508 for `constraint_classifier` and 0.508 for `risk_filter_uncertainty`.
+- The method is not simply refusing to move: abstention is 0.000, discovered area is lower than `constraint_classifier`, and path efficiency is higher than `risk_filter_uncertainty`.
+- Stress-sweep evidence is favorable locally: at stress 1.00, the proposed method scores 0.657 success versus 0.629 for `constraint_classifier` and 0.486 for `risk_filter_uncertainty`.
+- The reviewer is still right about submission readiness because no hardware or accepted external benchmark evidence exists.
+
+Updated response: keep `STRONG_REVISE`.
