@@ -1,9 +1,9 @@
 # Novelty Decision
 
-Decision: conditionally novel, not yet submission-ready.
+Decision: conceptually interesting, empirically not submission-ready.
 
-The local evidence supports a specific mechanism: aborted actions are partial observations of hidden constraints, and using abort geometry plus reason labels improves downstream replanning more than endpoint labels, costmaps, generic risk filters, or a trace classifier.
+The local evidence still supports a narrow idea: aborted partial trajectories can encode hidden-constraint information. However, the expanded v5 protocol shows that this representation is not enough. Robust barrier planning, kernel trace classification, and particle constraint belief baselines outperform ACD-v5 on closed-loop success under the decisive and aggregate hard-regime gates.
 
-The novelty boundary is not "another safe planner" or "another uncertainty filter." The contribution is the representation and use of aborted partial trajectories as constraint-surface evidence.
+The novelty boundary remains "aborted partial trajectories as constraint-surface evidence," not "another safe planner" or "another uncertainty filter." That boundary is potentially useful but not currently strong enough for an ICLR-main submission.
 
-The boundary remains vulnerable because related work in safety-constrained motion planning, control barrier functions, risk-aware planning, failure-aware robot learning, and human-robot safety is broad. A main-conference version needs a deeper manual synthesis and external validation.
+The paper is terminally archived unless a redesigned method beats the stronger baselines under the same frozen protocol and is validated on hardware or accepted external robotics benchmarks.

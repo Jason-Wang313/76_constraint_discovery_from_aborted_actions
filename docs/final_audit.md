@@ -2,57 +2,76 @@
 
 Paper: 76 constraint_discovery_from_aborted_actions
 
-Version: v4
+Version: v5 expanded evidence audit
 
-Terminal decision: STRONG_REVISE
+Terminal decision: KILL_ARCHIVE
 
 ## Evidence Completed
 
 - Local continuous robot-planning benchmark with visible clutter and hidden constraints.
 - Abort triggers: collision margin, fixture snag, force limit, human stop, unstable slip, visible collision, timeout.
-- Seven seeds: 0 through 6.
-- Five evaluation splits.
-- 2,205 main rollout rows.
-- 2,457 abort-evidence rows.
-- 245 seed-level metric rows.
-- 294 ablation rollout rows.
-- 1,050 stress-sweep raw rows.
-- 10 curated negative cases.
+- Eight seeds: 0 through 7.
+- Five evaluation splits with 14 scenarios per split.
+- 40 x 40 grid and six closed-loop replanning attempts.
+- 6,720 main rollout rows.
+- 4,368 abort-evidence rows.
+- 480 seed-level metric rows.
+- 96 aggregate hard-regime seed rows.
+- 800 ablation rollout rows.
+- 80 ablation seed rows.
+- 4,032 stress-sweep raw rows.
+- 2,048 fixed-risk raw rows.
+- 256 fixed-risk seed rows.
+- 12 curated negative cases.
+- 39-page compiled PDF with bright boxed citations and reference links.
 
 ## Gate Result
 
-The proposed method clears the local evidence gate, but not the ICLR-main submission gate.
+The proposed v5 method fails the frozen local evidence gate.
 
-- `abort_constraint_discovery`: 0.841 +/- 0.065 combined-abort-stress success.
-- `constraint_classifier`: 0.508 +/- 0.141 combined-abort-stress success.
-- `risk_filter_uncertainty`: 0.508 +/- 0.065 combined-abort-stress success.
-- Paired success difference versus `constraint_classifier`: 0.333 +/- 0.171.
-- Repeated-abort reduction versus `constraint_classifier`: 0.175.
-- Boundary-F1 improvement versus `constraint_classifier`: 0.052.
-- Oracle upper bound: 0.857 +/- 0.062 success.
+- `abort_constraint_discovery_v5`: 0.545 +/- 0.059 combined-abort-stress success.
+- `robust_barrier_mpc`: 0.884 +/- 0.052 combined-abort-stress success.
+- `particle_constraint_belief`: 0.866 +/- 0.072 combined-abort-stress success.
+- `kernel_trace_constraint_classifier`: 0.857 +/- 0.059 combined-abort-stress success.
+- Paired success difference versus `robust_barrier_mpc`: -0.339 +/- 0.074.
+- Violation reduction versus the strongest baseline: 0.107.
+- Repeated-abort reduction versus the strongest baseline: 0.080.
+- Boundary-F1 difference versus the strongest baseline: 0.036.
+- Efficiency difference versus the strongest baseline: -0.135.
+- Oracle upper bound: 0.911 +/- 0.044 success.
+
+Failed predefined gates:
+
+- `main_success_margin`
+- `main_paired_lower_bound`
+- `over_conservatism`
+- `aggregate_hard_regime`
+- `ablation_necessity`
+- `maximum_stress`
+- `fixed_risk`
+
+## Fixed-Risk Result
+
+At every predefined risk budget, ACD-v5 loses to a hostile non-oracle method.
+
+- Budget 0.08: ACD-v5 0.469 success; best non-oracle `robust_barrier_mpc` 0.922.
+- Budget 0.12: ACD-v5 0.547 success; best non-oracle `robust_barrier_mpc` 0.938.
+- Budget 0.18: ACD-v5 0.500 success; best non-oracle `particle_constraint_belief` 0.938.
+- Budget 0.25: ACD-v5 0.469 success; best non-oracle `robust_barrier_mpc` 0.859.
 
 ## Audit Conclusion
 
-The repo is now a real positive local-simulator artifact. It should not be submitted to ICLR main without external benchmark or hardware validation.
+The artifact is a serious negative result, not a submission-ready paper. It demonstrates that aborted-action traces can reduce repeated aborts and violations, but under stronger baselines that advantage does not translate into enough closed-loop success, efficiency, or component necessity. The honest terminal action is `KILL_ARCHIVE`.
 
-## Continuation Audit 2026-06-15
+## Artifact Audit 2026-06-21
 
 Rechecked gates:
 
-- `python -m py_compile src/run_experiment.py` passed.
-- CSV integrity passed after correcting stale documentation that claimed 12 negative cases; `results/negative_cases.csv` contains 10 data rows.
-- Evidence scale matched: 2,205 main rollout rows, 2,457 abort-evidence rows, 245 seed-level metric rows, 35 aggregate metric rows, 30 pairwise rows, 294 ablation rollout rows, 30 stress-sweep aggregate rows, and 1,050 stress-sweep raw rows.
-- Required baselines were present: `constraint_classifier`, `risk_filter_uncertainty`, `costmap_from_collisions`, `negative_label_baseline`, `ignore_aborted_actions`, and `oracle_constraints`.
-- LaTeX/BibTeX rebuilt a 5-page PDF after repairing missing bibliography authors and fragile float placement warnings.
-- `C:/Users/wangz/Downloads/76.pdf` SHA256 is `AC30D3A0C37CD6A23DC3458E61BA3E4E15E501CB0AB45EFC74E44750AC09F7D9`.
+- `python scripts/validate_submission_artifacts.py` passed.
+- Full CSV row counts matched the frozen v5 protocol.
+- `C:/Users/wangz/Downloads/76.pdf` has 39 pages.
+- `C:/Users/wangz/Downloads/76.pdf` SHA256 is `6FC325FF84FB16ACC5F86CB5FA908F1A68FAD5FAAC327C96D1907A2FA101A43E`.
 - `C:/Users/wangz/Desktop/76.pdf` does not exist.
+- Visual PDF samples checked: title/decision page, boxed citations, result plots, appendix tables, and bibliography pages.
 
-The local positive result was reproduced. On `combined_abort_stress`, `abort_constraint_discovery` scores 0.841 +/- 0.065 success. The strongest non-oracle baselines, `constraint_classifier` and `risk_filter_uncertainty`, each score 0.508 success. Paired proposed-minus-classifier success difference is 0.333 +/- 0.171 with 6/7 better seeds; paired proposed-minus-risk-filter success difference is 0.333 +/- 0.126 with 7/7 better seeds.
-
-The result is not merely conservatism. Versus `constraint_classifier`, discovered area is lower by 0.025 and path efficiency is only 0.012 lower. Versus `risk_filter_uncertainty`, path efficiency is higher by 0.038 and discovered area is higher by 0.083. Abstention is 0.000 for all central methods.
-
-Ablations support the mechanism locally. The full ablation variant reaches 0.786 +/- 0.170 success; removing abort-reason labels drops to 0.643, removing partial geometry drops to 0.571, and removing safety margin drops to 0.643.
-
-Stress evidence remains favorable but not decisive for ICLR main. At stress level 1.00, `abort_constraint_discovery` reaches 0.657 success, ahead of `constraint_classifier` at 0.629 and `risk_filter_uncertainty` at 0.486, but still below the oracle at 0.886.
-
-Continuation decision: keep `STRONG_REVISE`, not ICLR-main-ready. The missing gates are external benchmark validation, hardware validation, and a deeper manual related-work synthesis.
+Continuation decision: keep `KILL_ARCHIVE`. Do not submit as-is. A revival requires a redesigned method that survives robust-barrier, kernel-trace, and particle-belief baselines, plus accepted external benchmark or hardware validation.

@@ -1,2 +1,2 @@
-quick_mode,seeds,seed_count,grid_n,eval_scenarios_per_split,ablation_scenarios,stress_scenarios,max_attempts,splits,methods,ablation_methods,main_rollout_rows,abort_evidence_rows,seed_metric_rows,ablation_rows,stress_rows
-False,0;1;2;3;4;5;6,7,38,9,6,5,5,5,7,7,2205,2457,245,294,1050
+quick_mode,seeds,seed_count,grid_n,eval_scenarios_per_split,ablation_scenarios,stress_scenarios,fixed_risk_scenarios,max_attempts,reference_method,splits,methods,ablation_methods,fixed_risk_methods,main_rollout_rows,abort_evidence_rows,seed_metric_rows,aggregate_seed_rows,aggregate_metric_rows,ablation_rows,ablation_seed_rows,stress_rows,fixed_risk_rows,fixed_risk_seed_rows
+False,0;1;2;3;4;5;6;7,8,40,14,10,8,8,6,abort_constraint_discovery_v5,5,12,10,8,6720,4368,480,96,12,800,80,4032,2048,256

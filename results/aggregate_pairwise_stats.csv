@@ -1,0 +1,12 @@
+split,reference,comparison,paired_success_diff,ci95_success_diff,paired_violation_reduction,paired_repeated_abort_reduction,paired_boundary_f1_diff,paired_efficiency_diff,paired_discovered_area_diff,reference_better_seeds,seeds
+aggregate_hard_regime,abort_constraint_discovery_v5,abort_constraint_discovery,-0.08705,0.02762,0.13839,0.08259,-0.02101,-0.03888,0.02656,0,8
+aggregate_hard_regime,abort_constraint_discovery_v5,conformal_abort_risk_filter,-0.07589,0.03421,0.08929,0.09821,0.02810,-0.10678,0.10015,0,8
+aggregate_hard_regime,abort_constraint_discovery_v5,constraint_classifier,-0.05804,0.03013,0.10491,0.11161,0.05278,-0.09964,0.01700,0,8
+aggregate_hard_regime,abort_constraint_discovery_v5,costmap_from_collisions,-0.04464,0.02562,0.20313,0.21205,-0.00916,-0.07183,0.10076,0,8
+aggregate_hard_regime,abort_constraint_discovery_v5,ignore_aborted_actions,0.45759,0.03558,0.42411,0.59375,0.40551,0.11517,0.18705,8,8
+aggregate_hard_regime,abort_constraint_discovery_v5,kernel_trace_constraint_classifier,-0.14509,0.03401,0.07813,0.05357,0.10731,-0.10927,-0.02019,0,8
+aggregate_hard_regime,abort_constraint_discovery_v5,negative_label_baseline,0.18973,0.03168,0.32813,0.39063,0.16250,0.00953,0.16918,8,8
+aggregate_hard_regime,abort_constraint_discovery_v5,oracle_constraints,-0.14286,0.03373,0.03348,0.03795,-0.59449,-0.15965,0.12160,0,8
+aggregate_hard_regime,abort_constraint_discovery_v5,particle_constraint_belief,-0.14509,0.03937,0.02455,0.03125,0.03353,-0.09199,0.04619,0,8
+aggregate_hard_regime,abort_constraint_discovery_v5,risk_filter_uncertainty,-0.04018,0.03013,0.13616,0.18304,0.01000,-0.08255,0.09152,1,8
+aggregate_hard_regime,abort_constraint_discovery_v5,robust_barrier_mpc,-0.13616,0.03796,0.06473,0.03571,0.04307,-0.07708,0.02179,0,8

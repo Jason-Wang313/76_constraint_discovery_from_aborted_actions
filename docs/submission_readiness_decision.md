@@ -1,11 +1,11 @@
 # Submission Readiness Decision
 
-Decision: STRONG_REVISE
+Decision: KILL_ARCHIVE
 
 ICLR main-conference readiness: NO.
 
-Reason: The v4 rebuild provides real local abort-physics evidence and the proposed method beats all non-oracle baselines on the decisive split, but the evidence is still local only. It lacks real-robot validation, external safety-planning benchmark validation, and a manual full related-work synthesis deep enough for a main-conference submission.
+Reason: The v5 expanded rebuild created a serious local artifact, but the proposed method fails the frozen hostile local gate. ACD-v5 reaches 0.545 +/- 0.059 success on the decisive split, while `robust_barrier_mpc` reaches 0.884 +/- 0.052. Aggregate hard-regime, fixed-risk, maximum-stress, over-conservatism, and ablation-necessity checks also fail.
 
-Honest terminal action: revise before submission. Do not submit this paper to ICLR main in its current form.
+Honest terminal action: archive this version. Do not submit it to ICLR main.
 
-Revival condition: validate the same mechanism on hardware or an accepted external robotics benchmark, add stronger learned-planner baselines, and expand the related-work audit beyond the local hostile pool.
+Revival condition: redesign the method so it beats robust-barrier, kernel-trace, and particle-belief baselines under the same frozen protocol, then validate on hardware or an accepted external robotics benchmark.

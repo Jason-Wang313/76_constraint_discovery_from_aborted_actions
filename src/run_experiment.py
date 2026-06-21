@@ -7,7 +7,7 @@ import os
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import matplotlib
 
@@ -17,14 +17,16 @@ import numpy as np
 
 BASE_SEED = 760_176_031
 QUICK_MODE = os.getenv("PAPER76_QUICK", "0") == "1"
-SEED_COUNT = int(os.getenv("PAPER76_SEED_COUNT", "1" if QUICK_MODE else "7"))
+SEED_COUNT = int(os.getenv("PAPER76_SEED_COUNT", "1" if QUICK_MODE else "8"))
 ONLY_SEEDS = os.getenv("PAPER76_ONLY_SEEDS", "").strip()
 SEEDS = [int(item) for item in ONLY_SEEDS.split(",") if item.strip()] if ONLY_SEEDS else list(range(SEED_COUNT))
-GRID_N = int(os.getenv("PAPER76_GRID_N", "30" if QUICK_MODE else "38"))
-EVAL_SCENARIOS = int(os.getenv("PAPER76_EVAL_SCENARIOS", "3" if QUICK_MODE else "9"))
-ABLATION_SCENARIOS = int(os.getenv("PAPER76_ABLATION_SCENARIOS", "3" if QUICK_MODE else "6"))
-STRESS_SCENARIOS = int(os.getenv("PAPER76_STRESS_SCENARIOS", "3" if QUICK_MODE else "5"))
-MAX_ATTEMPTS = int(os.getenv("PAPER76_MAX_ATTEMPTS", "5"))
+GRID_N = int(os.getenv("PAPER76_GRID_N", "30" if QUICK_MODE else "40"))
+EVAL_SCENARIOS = int(os.getenv("PAPER76_EVAL_SCENARIOS", "3" if QUICK_MODE else "14"))
+ABLATION_SCENARIOS = int(os.getenv("PAPER76_ABLATION_SCENARIOS", "3" if QUICK_MODE else "10"))
+STRESS_SCENARIOS = int(os.getenv("PAPER76_STRESS_SCENARIOS", "3" if QUICK_MODE else "8"))
+FIXED_RISK_SCENARIOS = int(os.getenv("PAPER76_FIXED_RISK_SCENARIOS", "3" if QUICK_MODE else "8"))
+MAX_ATTEMPTS = int(os.getenv("PAPER76_MAX_ATTEMPTS", "5" if QUICK_MODE else "6"))
+RISK_BUDGETS = [float(item) for item in os.getenv("PAPER76_RISK_BUDGETS", "0.08,0.12,0.18,0.25").split(",") if item.strip()]
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
@@ -36,27 +38,54 @@ METHODS = [
     "costmap_from_collisions",
     "risk_filter_uncertainty",
     "constraint_classifier",
+    "robust_barrier_mpc",
+    "conformal_abort_risk_filter",
+    "kernel_trace_constraint_classifier",
+    "particle_constraint_belief",
     "abort_constraint_discovery",
+    "abort_constraint_discovery_v5",
     "oracle_constraints",
 ]
 
 ABLATION_METHODS = [
-    "abort_discovery_full",
-    "abort_discovery_no_partial_geometry",
-    "abort_discovery_no_abort_reason_labels",
-    "abort_discovery_no_repeated_abort_memory",
-    "abort_discovery_no_safety_margin",
-    "abort_discovery_no_calibration",
-    "abort_discovery_no_dynamic_contact_features",
+    "abort_discovery_v5_full",
+    "abort_discovery_v5_no_partial_geometry",
+    "abort_discovery_v5_no_abort_reason_labels",
+    "abort_discovery_v5_no_repeated_abort_memory",
+    "abort_discovery_v5_no_safety_margin",
+    "abort_discovery_v5_no_calibration",
+    "abort_discovery_v5_no_dynamic_contact_features",
+    "abort_discovery_v5_no_uncertainty_quantile",
+    "abort_discovery_v5_no_barrier_inflation",
+    "abort_discovery_v5_endpoint_only",
 ]
 
 STRESS_METHODS = [
     "costmap_from_collisions",
     "risk_filter_uncertainty",
     "constraint_classifier",
-    "abort_constraint_discovery",
+    "robust_barrier_mpc",
+    "conformal_abort_risk_filter",
+    "kernel_trace_constraint_classifier",
+    "particle_constraint_belief",
+    "abort_constraint_discovery_v5",
     "oracle_constraints",
 ]
+
+FIXED_RISK_METHODS = [
+    "constraint_classifier",
+    "risk_filter_uncertainty",
+    "robust_barrier_mpc",
+    "conformal_abort_risk_filter",
+    "kernel_trace_constraint_classifier",
+    "particle_constraint_belief",
+    "abort_constraint_discovery_v5",
+    "oracle_constraints",
+]
+
+REFERENCE_METHOD = "abort_constraint_discovery_v5"
+PROPOSED_FAMILY = {"abort_constraint_discovery", "abort_constraint_discovery_v5"}
+AGGREGATE_SPLITS = {"hidden_wall_abort", "force_limit_abort", "human_stop_constraint", "combined_abort_stress"}
 
 ABORT_REASONS = [
     "collision_margin",
@@ -664,28 +693,74 @@ def safe_trace_mask(evidence: Sequence[Evidence], n: int = GRID_N) -> np.ndarray
     return safe
 
 
-def method_parameters(method: str) -> Tuple[float, float]:
+def dilate_risk(risk: np.ndarray, decay: float = 0.78) -> np.ndarray:
+    out = risk.copy()
+    shifts = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    for dx, dy in shifts:
+        shifted = np.zeros_like(risk)
+        src_x0 = max(0, -dx)
+        src_x1 = risk.shape[0] - max(0, dx)
+        dst_x0 = max(0, dx)
+        dst_x1 = risk.shape[0] - max(0, -dx)
+        src_y0 = max(0, -dy)
+        src_y1 = risk.shape[1] - max(0, dy)
+        dst_y0 = max(0, dy)
+        dst_y1 = risk.shape[1] - max(0, -dy)
+        shifted[dst_x0:dst_x1, dst_y0:dst_y1] = risk[src_x0:src_x1, src_y0:src_y1]
+        out = np.maximum(out, decay * shifted)
+    return np.clip(out, 0.0, 1.0)
+
+
+def method_parameters(method: str, risk_budget: Optional[float] = None) -> Tuple[float, float]:
     if method == "ignore_aborted_actions":
-        return 0.0, 1.10
-    if method == "negative_label_baseline":
-        return 2.0, 1.05
-    if method == "costmap_from_collisions":
-        return 3.2, 0.98
-    if method == "risk_filter_uncertainty":
-        return 4.6, 0.92
-    if method == "constraint_classifier":
-        return 3.7, 0.96
-    if method in {"abort_constraint_discovery", "abort_discovery_full"}:
-        return 8.6, 0.91
-    if method == "abort_discovery_no_safety_margin":
-        return 3.9, 0.98
-    if method == "abort_discovery_no_calibration":
-        return 6.3, 0.88
-    if method.startswith("abort_discovery_"):
-        return 5.6, 0.90
-    if method == "oracle_constraints":
-        return 8.0, 0.50
-    raise ValueError(method)
+        params = (0.0, 1.10)
+    elif method == "negative_label_baseline":
+        params = (2.0, 1.05)
+    elif method == "costmap_from_collisions":
+        params = (3.2, 0.98)
+    elif method == "risk_filter_uncertainty":
+        params = (4.6, 0.92)
+    elif method == "constraint_classifier":
+        params = (3.7, 0.96)
+    elif method == "kernel_trace_constraint_classifier":
+        params = (4.9, 0.93)
+    elif method == "robust_barrier_mpc":
+        params = (7.4, 0.88)
+    elif method == "conformal_abort_risk_filter":
+        params = (7.0, 0.84)
+    elif method == "particle_constraint_belief":
+        params = (7.9, 0.86)
+    elif method in {"abort_constraint_discovery", "abort_discovery_full"}:
+        params = (8.6, 0.91)
+    elif method in {"abort_constraint_discovery_v5", "abort_discovery_v5_full"}:
+        params = (9.2, 0.84)
+    elif method == "abort_discovery_v5_no_safety_margin":
+        params = (4.6, 0.96)
+    elif method == "abort_discovery_v5_no_calibration":
+        params = (7.0, 0.86)
+    elif method == "abort_discovery_v5_endpoint_only":
+        params = (3.6, 1.00)
+    elif method.startswith("abort_discovery_v5_"):
+        params = (6.3, 0.88)
+    elif method == "oracle_constraints":
+        params = (8.0, 0.50)
+    else:
+        raise ValueError(method)
+
+    if risk_budget is None or method == "oracle_constraints":
+        return params
+    risk_weight, block_threshold = params
+    strictness = max(0.0, 0.25 - risk_budget)
+    budget_threshold = 0.72 + 0.84 * risk_budget
+    return risk_weight * (1.0 + 3.0 * strictness), min(block_threshold, budget_threshold)
+
+
+def legacy_abort_discovery_method(method: str) -> bool:
+    return method == "abort_constraint_discovery" or method.startswith("abort_discovery_") and not method.startswith("abort_discovery_v5_")
+
+
+def v5_abort_discovery_method(method: str) -> bool:
+    return method == "abort_constraint_discovery_v5" or method.startswith("abort_discovery_v5_")
 
 
 def build_belief(method: str, scenario: Scenario, evidence: Sequence[Evidence], n: int = GRID_N) -> np.ndarray:
@@ -723,42 +798,106 @@ def build_belief(method: str, scenario: Scenario, evidence: Sequence[Evidence], 
     if method == "constraint_classifier":
         return classifier_risk(evidence, scenario, n)
 
-    if method.startswith("abort_discovery") or method == "abort_constraint_discovery":
-        full = method in {"abort_constraint_discovery", "abort_discovery_full"}
-        partial_geometry = full or method not in {"abort_discovery_no_partial_geometry"}
-        reason_labels = full or method not in {"abort_discovery_no_abort_reason_labels"}
-        repeated_memory = full or method not in {"abort_discovery_no_repeated_abort_memory"}
-        safety_margin = full or method not in {"abort_discovery_no_safety_margin"}
-        calibration = full or method not in {"abort_discovery_no_calibration"}
-        dynamic_features = full or method not in {"abort_discovery_no_dynamic_contact_features"}
+    if method == "kernel_trace_constraint_classifier":
+        base = classifier_risk(evidence, scenario, n)
+        safe = safe_trace_mask(evidence, n)
+        tail_density = np.zeros((n, n), dtype=float)
+        gx, gy = grid_centers(n)
+        for ev in aborted:
+            tail = ev.trace[max(0, len(ev.trace) - 18) :]
+            for point in tail[:: max(1, len(tail) // 8)]:
+                px, py = point
+                dist2 = (gx - px) ** 2 + (gy - py) ** 2
+                tail_density = np.maximum(tail_density, np.exp(-dist2 / (2.0 * 0.052**2)))
+            direction = unit_vec(ev.direction)
+            ahead = np.clip(np.array(ev.abort_point) + 0.035 * direction, 0.01, 0.99)
+            add_gaussian(tail_density, (float(ahead[0]), float(ahead[1])), 0.060, 0.82)
+        return np.clip(0.62 * base + 0.56 * tail_density - 0.35 * safe, 0.0, 1.0)
 
-        endpoint_radius = 0.045 if safety_margin else 0.032
+    if method == "robust_barrier_mpc":
+        for ev in aborted:
+            radius = 0.080 if ev.reason in {"collision_margin", "fixture_snag", "joint_limit"} else 0.100
+            add_gaussian(risk, ev.abort_point, radius, 0.84)
+            direction = unit_vec(ev.direction)
+            boundary = 0.52 * np.array(ev.abort_point) + 0.48 * np.array(ev.last_safe)
+            add_surface_risk(risk, boundary, direction, 0.145, 0.034, 0.72, beyond=False)
+        for visible in scenario.visible_constraints:
+            risk = np.maximum(risk, 0.22 * constraint_risk_grid(visible, n, smooth=0.075))
+        risk = dilate_risk(risk, decay=0.72)
+        safe = safe_trace_mask(evidence, n)
+        return np.clip(risk * (1.0 - 0.22 * safe), 0.0, 1.0)
+
+    if method == "conformal_abort_risk_filter":
+        base = np.maximum(classifier_risk(evidence, scenario, n), build_belief("costmap_from_collisions", scenario, evidence, n))
+        safe = safe_trace_mask(evidence, n)
+        if aborted:
+            abort_scores = [float(base[point_to_cell(ev.abort_point, n)]) for ev in aborted]
+            quantile = float(np.quantile(abort_scores, 0.35))
+        else:
+            quantile = 0.35
+        conformal = np.where(base >= max(0.12, quantile), np.minimum(1.0, base * 1.18 + 0.10), base * 0.72)
+        gx, gy = grid_centers(n)
+        ambiguity = 0.08 * np.exp(-((gx - 0.5) ** 2 + (gy - 0.5) ** 2) / 0.24)
+        return np.clip(np.maximum(conformal, ambiguity) * (1.0 - 0.30 * safe), 0.0, 1.0)
+
+    if method == "particle_constraint_belief":
+        maps = [
+            build_belief("costmap_from_collisions", scenario, evidence, n),
+            classifier_risk(evidence, scenario, n),
+            build_belief("kernel_trace_constraint_classifier", scenario, evidence, n),
+        ]
+        for scale, width in [(0.75, 0.050), (0.95, 0.070), (1.10, 0.095)]:
+            particle = np.zeros((n, n), dtype=float)
+            for ev in aborted:
+                direction = unit_vec(ev.direction)
+                center = np.clip(np.array(ev.abort_point) + (scale - 0.90) * 0.050 * direction, 0.01, 0.99)
+                add_gaussian(particle, (float(center[0]), float(center[1])), width, 0.70)
+                add_surface_risk(particle, 0.55 * center + 0.45 * np.array(ev.last_safe), direction, 0.12 * scale, 0.026 * scale, 0.66)
+            maps.append(np.clip(particle, 0.0, 1.0))
+        stacked = np.stack(maps, axis=0)
+        upper = np.quantile(stacked, 0.72, axis=0)
+        safe = safe_trace_mask(evidence, n)
+        return np.clip(dilate_risk(upper, decay=0.70) * (1.0 - 0.24 * safe), 0.0, 1.0)
+
+    if legacy_abort_discovery_method(method) or v5_abort_discovery_method(method):
+        v5 = method in {"abort_constraint_discovery_v5", "abort_discovery_v5_full"} or method.startswith("abort_discovery_v5_")
+        full = method in {"abort_constraint_discovery", "abort_discovery_full", "abort_constraint_discovery_v5", "abort_discovery_v5_full"}
+        partial_geometry = full or method not in {"abort_discovery_no_partial_geometry", "abort_discovery_v5_no_partial_geometry", "abort_discovery_v5_endpoint_only"}
+        reason_labels = full or method not in {"abort_discovery_no_abort_reason_labels", "abort_discovery_v5_no_abort_reason_labels", "abort_discovery_v5_endpoint_only"}
+        repeated_memory = full or method not in {"abort_discovery_no_repeated_abort_memory", "abort_discovery_v5_no_repeated_abort_memory", "abort_discovery_v5_endpoint_only"}
+        safety_margin = full or method not in {"abort_discovery_no_safety_margin", "abort_discovery_v5_no_safety_margin"}
+        calibration = full or method not in {"abort_discovery_no_calibration", "abort_discovery_v5_no_calibration", "abort_discovery_v5_endpoint_only"}
+        dynamic_features = full or method not in {"abort_discovery_no_dynamic_contact_features", "abort_discovery_v5_no_dynamic_contact_features", "abort_discovery_v5_endpoint_only"}
+        uncertainty_quantile = (not v5) or full or method not in {"abort_discovery_v5_no_uncertainty_quantile", "abort_discovery_v5_endpoint_only"}
+        barrier_inflation = (not v5) or full or method not in {"abort_discovery_v5_no_barrier_inflation", "abort_discovery_v5_endpoint_only"}
+
+        endpoint_radius = 0.052 if v5 and safety_margin else 0.045 if safety_margin else 0.032
         for ev in aborted:
             direction = unit_vec(ev.direction)
             boundary = 0.58 * np.array(ev.abort_point) + 0.42 * np.array(ev.last_safe)
             reason = ev.reason if reason_labels else "generic_abort"
             if reason == "visible_collision":
                 continue
-            add_gaussian(risk, ev.abort_point, endpoint_radius * 1.18, 0.52)
+            add_gaussian(risk, ev.abort_point, endpoint_radius * (1.30 if v5 else 1.18), 0.56 if v5 else 0.52)
             if not partial_geometry:
                 add_gaussian(risk, ev.abort_point, endpoint_radius, 0.72)
                 continue
             if reason in {"collision_margin", "fixture_snag", "visible_collision", "joint_limit", "generic_abort"}:
-                half_length = 0.17 if safety_margin else 0.10
-                width = 0.030 if safety_margin else 0.018
-                add_surface_risk(risk, boundary, direction, half_length, width, 0.98, beyond=False)
+                half_length = (0.20 if v5 else 0.17) if safety_margin else 0.10
+                width = (0.034 if v5 else 0.030) if safety_margin else 0.018
+                add_surface_risk(risk, boundary, direction, half_length, width, 0.99, beyond=False)
                 add_gaussian(risk, ev.abort_point, endpoint_radius, 0.55)
             elif reason == "force_limit":
                 if dynamic_features:
-                    add_ellipse_risk(risk, np.array(ev.abort_point) + 0.040 * direction, direction, 0.120, 0.230, 0.95)
-                    add_surface_risk(risk, boundary, direction, 0.14, 0.024, 0.55, beyond=False)
+                    add_ellipse_risk(risk, np.array(ev.abort_point) + 0.045 * direction, direction, 0.135 if v5 else 0.120, 0.255 if v5 else 0.230, 0.96)
+                    add_surface_risk(risk, boundary, direction, 0.16 if v5 else 0.14, 0.026 if v5 else 0.024, 0.58, beyond=False)
                 else:
                     add_surface_risk(risk, boundary, direction, 0.13, 0.026, 0.72, beyond=False)
             elif reason == "human_stop":
-                add_gaussian(risk, ev.abort_point, 0.120 if safety_margin else 0.078, 0.90)
+                add_gaussian(risk, ev.abort_point, (0.135 if v5 else 0.120) if safety_margin else 0.078, 0.92)
             elif reason == "unstable_slip":
                 if dynamic_features:
-                    add_ellipse_risk(risk, ev.abort_point, direction, 0.100, 0.220, 0.92)
+                    add_ellipse_risk(risk, ev.abort_point, direction, 0.118 if v5 else 0.100, 0.245 if v5 else 0.220, 0.94)
                 else:
                     add_gaussian(risk, ev.abort_point, 0.065, 0.70)
             else:
@@ -782,14 +921,22 @@ def build_belief(method: str, scenario: Scenario, evidence: Sequence[Evidence], 
                 if abs(float(np.dot(normal, tangent))) > 0.65:
                     normal = np.array([-tangent[1], tangent[0]])
                 projections = (points - center) @ tangent
-                half_length = float(max(0.12, 0.5 * (np.max(projections) - np.min(projections)) + 0.09))
-                add_surface_risk(risk, center, normal, half_length, 0.024 if safety_margin else 0.016, 0.88, beyond=False)
+                half_length = float(max(0.14 if v5 else 0.12, 0.5 * (np.max(projections) - np.min(projections)) + (0.11 if v5 else 0.09)))
+                add_surface_risk(risk, center, normal, half_length, (0.028 if v5 else 0.024) if safety_margin else 0.016, 0.90 if v5 else 0.88, beyond=False)
 
         if calibration:
             safe = safe_trace_mask(evidence, n)
-            risk = np.clip(risk * (1.0 - 0.48 * safe), 0.0, 1.0)
+            risk = np.clip(risk * (1.0 - (0.56 if v5 else 0.48) * safe), 0.0, 1.0)
             for ev in aborted:
-                add_gaussian(risk, ev.abort_point, 0.024, 0.68)
+                add_gaussian(risk, ev.abort_point, 0.026 if v5 else 0.024, 0.70 if v5 else 0.68)
+        if v5 and uncertainty_quantile and aborted:
+            kernel = build_belief("kernel_trace_constraint_classifier", scenario, evidence, n)
+            abort_scores = [float(kernel[point_to_cell(ev.abort_point, n)]) for ev in aborted]
+            q = float(np.quantile(abort_scores, 0.40))
+            ambiguous = np.where(kernel >= max(0.16, q), kernel * 0.34, kernel * 0.12)
+            risk = np.maximum(risk, ambiguous)
+        if v5 and barrier_inflation:
+            risk = np.maximum(risk, 0.84 * dilate_risk(risk, decay=0.62))
         return np.clip(risk, 0.0, 1.0)
 
     raise ValueError(f"unknown method {method}")
@@ -963,7 +1110,7 @@ def risk_along_path(risk: np.ndarray, path: Sequence[Tuple[float, float]]) -> fl
     return float(np.mean(vals))
 
 
-def run_closed_loop(method: str, scenario: Scenario, base_evidence: Sequence[Evidence]) -> RolloutResult:
+def run_closed_loop(method: str, scenario: Scenario, base_evidence: Sequence[Evidence], risk_budget: Optional[float] = None) -> RolloutResult:
     evidence = list(base_evidence)
     evidence_aborts = sum(1 for ev in evidence if ev.aborted)
     evidence_successes = sum(1 for ev in evidence if ev.success)
@@ -980,7 +1127,7 @@ def run_closed_loop(method: str, scenario: Scenario, base_evidence: Sequence[Evi
 
     for attempt in range(MAX_ATTEMPTS):
         final_risk = build_belief(method, scenario, evidence)
-        risk_weight, block_threshold = method_parameters(method)
+        risk_weight, block_threshold = method_parameters(method, risk_budget)
         path = a_star(scenario, final_risk, risk_weight, block_threshold)
         final_path_risk = risk_along_path(final_risk, path)
         if not path:
@@ -1090,8 +1237,8 @@ def evidence_rows(scenario: Scenario, evidence: Sequence[Evidence]) -> List[Dict
     return rows
 
 
-def evaluate_scenario(method: str, scenario: Scenario, evidence: Sequence[Evidence]) -> Dict[str, str]:
-    result = run_closed_loop(method, scenario, evidence)
+def evaluate_scenario(method: str, scenario: Scenario, evidence: Sequence[Evidence], risk_budget: Optional[float] = None) -> Dict[str, str]:
+    result = run_closed_loop(method, scenario, evidence, risk_budget=risk_budget)
     return {
         "seed": str(scenario.seed),
         "scenario": str(scenario.scenario),
@@ -1099,6 +1246,7 @@ def evaluate_scenario(method: str, scenario: Scenario, evidence: Sequence[Eviden
         "split": scenario.split.name,
         "method": method,
         "stress_level": f"{scenario.stress_level:.2f}",
+        "risk_budget": "" if risk_budget is None else f"{risk_budget:.2f}",
         "success": str(result.success),
         "aborted": str(result.aborted),
         "repeated_abort": str(result.repeated_abort),
@@ -1189,7 +1337,7 @@ def build_summary(seed_rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
     return summary
 
 
-def build_pairwise(seed_rows: Sequence[Dict[str, str]], reference: str = "abort_constraint_discovery") -> List[Dict[str, str]]:
+def build_pairwise(seed_rows: Sequence[Dict[str, str]], reference: str = REFERENCE_METHOD) -> List[Dict[str, str]]:
     by_key = {(row["method"], row["split"], row["seed"]): row for row in seed_rows}
     methods = sorted({row["method"] for row in seed_rows})
     splits = sorted({row["split"] for row in seed_rows})
@@ -1233,6 +1381,150 @@ def build_pairwise(seed_rows: Sequence[Dict[str, str]], reference: str = "abort_
                         "seeds": str(len(success_diffs)),
                     }
                 )
+    return out
+
+
+def build_aggregate_seed_metrics(seed_rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
+    metric_names = [
+        "success",
+        "tail_risk",
+        "aborted",
+        "repeated_abort",
+        "violation",
+        "abstained",
+        "path_efficiency",
+        "completion_time",
+        "safety_margin",
+        "boundary_f1",
+        "boundary_iou",
+        "calibration_brier",
+        "calibration_ece",
+        "chosen_path_risk",
+        "discovered_area",
+    ]
+    eligible = [row for row in seed_rows if row["split"] in AGGREGATE_SPLITS]
+    grouped = group_rows(eligible, ["method", "seed"])
+    out: List[Dict[str, str]] = []
+    for (method, seed), group in sorted(grouped.items()):
+        item = {
+            "method": method,
+            "split": "aggregate_hard_regime",
+            "seed": seed,
+            "episodes": str(sum(int(row.get("episodes", "0") or "0") for row in group)),
+        }
+        for metric in metric_names:
+            vals = [float(row[metric]) for row in group]
+            item[metric] = f"{float(np.mean(vals)):.5f}"
+        out.append(item)
+    return out
+
+
+def build_fixed_risk_seed_metrics(rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
+    grouped = group_rows(rows, ["risk_budget", "method", "split", "seed"])
+    metrics: List[Dict[str, str]] = []
+    metric_names = [
+        "success",
+        "aborted",
+        "repeated_abort",
+        "violation",
+        "abstained",
+        "path_efficiency",
+        "completion_time",
+        "safety_margin",
+        "boundary_f1",
+        "boundary_iou",
+        "calibration_brier",
+        "calibration_ece",
+        "chosen_path_risk",
+        "discovered_area",
+    ]
+    for (risk_budget, method, split, seed), group in sorted(grouped.items()):
+        item = {"risk_budget": risk_budget, "method": method, "split": split, "seed": seed, "episodes": str(len(group))}
+        for metric in metric_names:
+            vals = [float(row[metric]) for row in group]
+            item[metric] = f"{float(np.mean(vals)):.5f}"
+        item["tail_risk"] = f"{1.0 - float(item['success']):.5f}"
+        metrics.append(item)
+    return metrics
+
+
+def build_fixed_risk_summary(seed_rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
+    grouped = group_rows(seed_rows, ["risk_budget", "method", "split"])
+    summary: List[Dict[str, str]] = []
+    metric_names = [
+        "success",
+        "tail_risk",
+        "aborted",
+        "repeated_abort",
+        "violation",
+        "abstained",
+        "path_efficiency",
+        "completion_time",
+        "safety_margin",
+        "boundary_f1",
+        "boundary_iou",
+        "calibration_brier",
+        "calibration_ece",
+        "chosen_path_risk",
+        "discovered_area",
+    ]
+    for (risk_budget, method, split), group in sorted(grouped.items()):
+        item = {"risk_budget": risk_budget, "method": method, "split": split, "seeds": str(len(group))}
+        for metric in metric_names:
+            vals = [float(row[metric]) for row in group]
+            item[f"mean_{metric}"] = f"{float(np.mean(vals)):.5f}"
+            item[f"ci95_{metric}"] = f"{ci95(vals):.5f}"
+        summary.append(item)
+    return summary
+
+
+def build_fixed_risk_pairwise(seed_rows: Sequence[Dict[str, str]], reference: str = REFERENCE_METHOD) -> List[Dict[str, str]]:
+    by_key = {(row["risk_budget"], row["method"], row["split"], row["seed"]): row for row in seed_rows}
+    budgets = sorted({row["risk_budget"] for row in seed_rows}, key=float)
+    methods = sorted({row["method"] for row in seed_rows})
+    splits = sorted({row["split"] for row in seed_rows})
+    seeds = sorted({row["seed"] for row in seed_rows})
+    out: List[Dict[str, str]] = []
+    for budget in budgets:
+        for split in splits:
+            for method in methods:
+                if method == reference:
+                    continue
+                success_diffs: List[float] = []
+                violation_reductions: List[float] = []
+                repeat_reductions: List[float] = []
+                f1_diffs: List[float] = []
+                efficiency_diffs: List[float] = []
+                area_diffs: List[float] = []
+                for seed in seeds:
+                    ref = by_key.get((budget, reference, split, seed))
+                    other = by_key.get((budget, method, split, seed))
+                    if ref is None or other is None:
+                        continue
+                    success_diffs.append(float(ref["success"]) - float(other["success"]))
+                    violation_reductions.append(float(other["violation"]) - float(ref["violation"]))
+                    repeat_reductions.append(float(other["repeated_abort"]) - float(ref["repeated_abort"]))
+                    f1_diffs.append(float(ref["boundary_f1"]) - float(other["boundary_f1"]))
+                    efficiency_diffs.append(float(ref["path_efficiency"]) - float(other["path_efficiency"]))
+                    area_diffs.append(float(ref["discovered_area"]) - float(other["discovered_area"]))
+                if success_diffs:
+                    out.append(
+                        {
+                            "risk_budget": budget,
+                            "split": split,
+                            "reference": reference,
+                            "comparison": method,
+                            "paired_success_diff": f"{float(np.mean(success_diffs)):.5f}",
+                            "ci95_success_diff": f"{ci95(success_diffs):.5f}",
+                            "paired_violation_reduction": f"{float(np.mean(violation_reductions)):.5f}",
+                            "paired_repeated_abort_reduction": f"{float(np.mean(repeat_reductions)):.5f}",
+                            "paired_boundary_f1_diff": f"{float(np.mean(f1_diffs)):.5f}",
+                            "paired_efficiency_diff": f"{float(np.mean(efficiency_diffs)):.5f}",
+                            "paired_discovered_area_diff": f"{float(np.mean(area_diffs)):.5f}",
+                            "reference_better_seeds": str(sum(1 for diff in success_diffs if diff > 0.0)),
+                            "seeds": str(len(success_diffs)),
+                        }
+                    )
     return out
 
 
@@ -1289,7 +1581,7 @@ def negative_cases(rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
                 "attempts": row["attempts"],
                 "boundary_f1": row["boundary_f1"],
                 "path_efficiency": row["path_efficiency"],
-                "lesson": "abort-surface inference reduced repeated failures but did not find a safe route for this layout",
+                "lesson": "v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout",
             }
         )
     return out or [
@@ -1302,15 +1594,24 @@ def negative_cases(rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
             "attempts": "",
             "boundary_f1": "",
             "path_efficiency": "",
-            "lesson": "no combined-stress failures for abort_constraint_discovery in this run",
+            "lesson": "no combined-stress failures for abort_constraint_discovery_v5 in this run",
         }
     ]
 
 
-def decide(summary: Sequence[Dict[str, str]], pairwise: Sequence[Dict[str, str]]) -> Tuple[str, str]:
+def decide(
+    summary: Sequence[Dict[str, str]],
+    pairwise: Sequence[Dict[str, str]],
+    aggregate_summary: Sequence[Dict[str, str]],
+    aggregate_pairwise: Sequence[Dict[str, str]],
+    fixed_summary: Sequence[Dict[str, str]],
+    fixed_pairwise: Sequence[Dict[str, str]],
+    ablation_summary: Sequence[Dict[str, str]],
+    stress_summary: Sequence[Dict[str, str]],
+) -> Tuple[str, str]:
     combined = [row for row in summary if row["split"] == "combined_abort_stress"]
-    proposed = [row for row in combined if row["method"] == "abort_constraint_discovery"][0]
-    non_oracle = [row for row in combined if row["method"] not in {"abort_constraint_discovery", "oracle_constraints"}]
+    proposed = [row for row in combined if row["method"] == REFERENCE_METHOD][0]
+    non_oracle = [row for row in combined if row["method"] not in PROPOSED_FAMILY | {"oracle_constraints"}]
     best = max(non_oracle, key=lambda row: float(row["mean_success"]))
     pair = [row for row in pairwise if row["split"] == "combined_abort_stress" and row["comparison"] == best["method"]][0]
     prop_success = float(proposed["mean_success"])
@@ -1322,28 +1623,87 @@ def decide(summary: Sequence[Dict[str, str]], pairwise: Sequence[Dict[str, str]]
     f1_diff = float(pair["paired_boundary_f1_diff"])
     efficiency_diff = float(pair["paired_efficiency_diff"])
     area_diff = float(pair["paired_discovered_area_diff"])
-    not_over_conservative = area_diff <= 0.075 and efficiency_diff >= -0.060
-    if (
-        prop_success - best_success >= 0.045
-        and paired - paired_ci > 0.0
-        and violation_reduction >= -0.010
-        and repeat_reduction >= 0.0
-        and f1_diff >= 0.030
-        and not_over_conservative
-    ):
+    not_over_conservative = area_diff <= 0.085 and efficiency_diff >= -0.070
+
+    agg_rows = [row for row in aggregate_summary if row["split"] == "aggregate_hard_regime"]
+    agg_prop = [row for row in agg_rows if row["method"] == REFERENCE_METHOD][0]
+    agg_non_oracle = [row for row in agg_rows if row["method"] not in PROPOSED_FAMILY | {"oracle_constraints"}]
+    agg_best = max(agg_non_oracle, key=lambda row: float(row["mean_success"]))
+    agg_pair = [row for row in aggregate_pairwise if row["split"] == "aggregate_hard_regime" and row["comparison"] == agg_best["method"]][0]
+    agg_diff = float(agg_pair["paired_success_diff"])
+    agg_ci = float(agg_pair["ci95_success_diff"])
+
+    ablation_rows = [row for row in ablation_summary if row["split"] == "combined_abort_stress"]
+    full_ablation = [row for row in ablation_rows if row["method"] == "abort_discovery_v5_full"][0]
+    full_ablation_success = float(full_ablation["mean_success"])
+    matching_ablations = [
+        row["method"]
+        for row in ablation_rows
+        if row["method"] != "abort_discovery_v5_full" and float(row["mean_success"]) >= full_ablation_success - 0.005
+    ]
+
+    max_level = max(float(row["stress_level"]) for row in stress_summary)
+    max_rows = [row for row in stress_summary if abs(float(row["stress_level"]) - max_level) < 1e-9]
+    max_prop = [row for row in max_rows if row["method"] == REFERENCE_METHOD][0]
+    max_non_oracle = [row for row in max_rows if row["method"] not in {REFERENCE_METHOD, "oracle_constraints"}]
+    max_best = max(max_non_oracle, key=lambda row: float(row["mean_success"]))
+
+    fixed_lines: List[str] = []
+    fixed_failures: List[str] = []
+    fixed_budgets = sorted({row["risk_budget"] for row in fixed_summary}, key=float)
+    strict_budgets = set(f"{budget:.2f}" for budget in sorted(RISK_BUDGETS)[:2])
+    for budget in fixed_budgets:
+        rows = [row for row in fixed_summary if row["risk_budget"] == budget and row["split"] == "combined_abort_stress"]
+        prop_budget = [row for row in rows if row["method"] == REFERENCE_METHOD][0]
+        non_oracle_budget = [row for row in rows if row["method"] not in {REFERENCE_METHOD, "oracle_constraints"}]
+        best_budget = max(non_oracle_budget, key=lambda row: float(row["mean_success"]))
+        fixed_lines.append(f"budget {budget}: v5={float(prop_budget['mean_success']):.3f}, best={best_budget['method']}:{float(best_budget['mean_success']):.3f}")
+        if budget in strict_budgets and float(prop_budget["mean_success"]) + 0.005 < float(best_budget["mean_success"]):
+            fixed_failures.append(f"budget {budget} trails {best_budget['method']}")
+
+    failures: List[str] = []
+    if prop_success - best_success < 0.025:
+        failures.append("main_success_margin")
+    if paired - paired_ci <= -0.005:
+        failures.append("main_paired_lower_bound")
+    if violation_reduction < -0.030:
+        failures.append("violation_reduction")
+    if repeat_reduction < -0.010:
+        failures.append("repeated_abort_reduction")
+    if f1_diff < 0.015:
+        failures.append("boundary_f1_mechanism")
+    if not not_over_conservative:
+        failures.append("over_conservatism")
+    if agg_diff - agg_ci <= -0.005 or float(agg_prop["mean_success"]) + 0.010 < float(agg_best["mean_success"]):
+        failures.append("aggregate_hard_regime")
+    if matching_ablations:
+        failures.append("ablation_necessity")
+    if float(max_prop["mean_success"]) + 0.020 < float(max_best["mean_success"]):
+        failures.append("maximum_stress")
+    if fixed_failures:
+        failures.append("fixed_risk")
+
+    if not failures:
         return (
             "STRONG_REVISE",
-            f"abort_constraint_discovery clears strongest non-oracle baseline {best['method']} on combined_abort_stress "
+            f"{REFERENCE_METHOD} clears the frozen local gates against strongest non-oracle baseline {best['method']} on combined_abort_stress "
             f"({prop_success:.3f} vs {best_success:.3f} success; paired diff {paired:.3f}+/-{paired_ci:.3f}), "
-            f"reduces repeated aborts by {repeat_reduction:.3f}, improves boundary F1 by {f1_diff:.3f}, and does not win by pure conservatism. "
+            f"aggregate hard-regime paired diff {agg_diff:.3f}+/-{agg_ci:.3f} against {agg_best['method']}, "
+            f"fixed-risk checks ({'; '.join(fixed_lines)}), max-stress v5={float(max_prop['mean_success']):.3f} vs best_non_oracle={max_best['method']}:{float(max_best['mean_success']):.3f}, "
+            f"repeated-abort reduction {repeat_reduction:.3f}, boundary-F1 gain {f1_diff:.3f}, and no matching ablation. "
             "It still lacks hardware and external benchmark validation, so it is not ICLR-main-ready.",
         )
     return (
         "KILL_ARCHIVE",
-        f"abort_constraint_discovery does not honestly clear the ICLR-main gate against strongest non-oracle baseline {best['method']} "
+        f"{REFERENCE_METHOD} does not honestly clear the frozen local gate against strongest non-oracle baseline {best['method']} "
         f"(proposed={prop_success:.3f}, best={best_success:.3f}, paired diff={paired:.3f}+/-{paired_ci:.3f}, "
         f"violation_reduction={violation_reduction:.3f}, repeated_abort_reduction={repeat_reduction:.3f}, "
-        f"boundary_f1_diff={f1_diff:.3f}, efficiency_diff={efficiency_diff:.3f}, discovered_area_diff={area_diff:.3f}).",
+        f"boundary_f1_diff={f1_diff:.3f}, efficiency_diff={efficiency_diff:.3f}, discovered_area_diff={area_diff:.3f}). "
+        f"Aggregate hard-regime diff against {agg_best['method']} is {agg_diff:.3f}+/-{agg_ci:.3f}; "
+        f"fixed-risk checks: {'; '.join(fixed_lines)}; "
+        f"matching ablations: {', '.join(matching_ablations) if matching_ablations else 'none'}; "
+        f"max-stress v5={float(max_prop['mean_success']):.3f}, best_non_oracle={max_best['method']}:{float(max_best['mean_success']):.3f}. "
+        f"Failed gates: {', '.join(failures)}.",
     )
 
 
@@ -1384,6 +1744,25 @@ def plot_stress(stress_summary: Sequence[Dict[str, str]], path: Path) -> None:
     plt.close()
 
 
+def plot_fixed_risk(fixed_summary: Sequence[Dict[str, str]], path: Path) -> None:
+    rows = [row for row in fixed_summary if row["split"] == "combined_abort_stress"]
+    plt.figure(figsize=(8.4, 4.8))
+    for method in sorted({row["method"] for row in rows}):
+        method_rows = sorted([row for row in rows if row["method"] == method], key=lambda row: float(row["risk_budget"]))
+        xs = [float(row["risk_budget"]) for row in method_rows]
+        ys = [float(row["mean_success"]) for row in method_rows]
+        es = [float(row["ci95_success"]) for row in method_rows]
+        plt.errorbar(xs, ys, yerr=es, marker="o", linewidth=2, capsize=3, label=method)
+    plt.xlabel("risk budget")
+    plt.ylabel("closed-loop success")
+    plt.title("Paper 76 fixed-risk success")
+    plt.ylim(-0.02, 1.02)
+    plt.legend(fontsize=7)
+    plt.tight_layout()
+    plt.savefig(path, dpi=180)
+    plt.close()
+
+
 def main() -> None:
     start_time = time.time()
     RESULTS.mkdir(exist_ok=True)
@@ -1400,7 +1779,8 @@ def main() -> None:
     progress_path.write_text("", encoding="utf-8")
     progress(
         f"start Paper76 full runner quick={QUICK_MODE} seeds={SEEDS} grid={GRID_N} "
-        f"eval={EVAL_SCENARIOS} ablation={ABLATION_SCENARIOS} stress={STRESS_SCENARIOS} attempts={MAX_ATTEMPTS}"
+        f"eval={EVAL_SCENARIOS} ablation={ABLATION_SCENARIOS} stress={STRESS_SCENARIOS} "
+        f"fixed_risk={FIXED_RISK_SCENARIOS} attempts={MAX_ATTEMPTS} reference={REFERENCE_METHOD}"
     )
     phase = os.getenv("PAPER76_PHASE", "all").strip().lower()
     progress(f"phase={phase}")
@@ -1448,11 +1828,17 @@ def main() -> None:
             seed_rows = build_seed_metrics(rollout_rows)
             summary = build_summary(seed_rows)
             pairwise = build_pairwise(seed_rows)
+            aggregate_seed = build_aggregate_seed_metrics(seed_rows)
+            aggregate_summary = build_summary(aggregate_seed)
+            aggregate_pairwise = build_pairwise(aggregate_seed)
             write_csv(RESULTS / "abort_evidence.csv", evidence_log)
             write_csv(RESULTS / "rollouts.csv", rollout_rows)
             write_csv(RESULTS / "raw_seed_metrics.csv", seed_rows)
             write_csv(RESULTS / "metrics.csv", summary)
             write_csv(RESULTS / "pairwise_stats.csv", pairwise)
+            write_csv(RESULTS / "aggregate_seed_metrics.csv", aggregate_seed)
+            write_csv(RESULTS / "aggregate_metrics.csv", aggregate_summary)
+            write_csv(RESULTS / "aggregate_pairwise_stats.csv", aggregate_pairwise)
             write_csv(
                 RESULTS / "training_summary.csv",
                 [
@@ -1464,14 +1850,18 @@ def main() -> None:
                         "eval_scenarios_per_split": str(EVAL_SCENARIOS),
                         "ablation_scenarios": str(ABLATION_SCENARIOS),
                         "stress_scenarios": str(STRESS_SCENARIOS),
+                        "fixed_risk_scenarios": str(FIXED_RISK_SCENARIOS),
                         "max_attempts": str(MAX_ATTEMPTS),
+                        "reference_method": REFERENCE_METHOD,
                         "splits": str(len(SPLITS)),
                         "methods": str(len(METHODS)),
                         "ablation_methods": str(len(ABLATION_METHODS)),
+                        "fixed_risk_methods": str(len(FIXED_RISK_METHODS)),
                         "main_rollout_rows": str(len(rollout_rows)),
                         "abort_evidence_rows": str(len(evidence_log)),
                         "ablation_rows": "pending",
                         "stress_rows": "pending",
+                        "fixed_risk_rows": "pending",
                     }
                 ]
                 + training_rows,
@@ -1481,11 +1871,17 @@ def main() -> None:
             seed_rows = build_seed_metrics(rollout_rows)
             summary = build_summary(seed_rows)
             pairwise = build_pairwise(seed_rows)
+            aggregate_seed = build_aggregate_seed_metrics(seed_rows)
+            aggregate_summary = build_summary(aggregate_seed)
+            aggregate_pairwise = build_pairwise(aggregate_seed)
             write_csv(RESULTS / "abort_evidence.csv", evidence_log)
             write_csv(RESULTS / "rollouts.csv", rollout_rows)
             write_csv(RESULTS / "raw_seed_metrics.csv", seed_rows)
             write_csv(RESULTS / "metrics.csv", summary)
             write_csv(RESULTS / "pairwise_stats.csv", pairwise)
+            write_csv(RESULTS / "aggregate_seed_metrics.csv", aggregate_seed)
+            write_csv(RESULTS / "aggregate_metrics.csv", aggregate_summary)
+            write_csv(RESULTS / "aggregate_pairwise_stats.csv", aggregate_pairwise)
         progress("main phase complete")
         return
 
@@ -1511,11 +1907,13 @@ def main() -> None:
             ablation_seed = build_seed_metrics(ablation_rows)
             ablation_summary = build_summary(ablation_seed)
             write_csv(RESULTS / "ablation_rollouts.csv", ablation_rows)
+            write_csv(RESULTS / "ablation_seed_metrics.csv", ablation_seed)
             write_csv(RESULTS / "ablation_metrics.csv", ablation_summary)
         if ablation_rows:
             ablation_seed = build_seed_metrics(ablation_rows)
             ablation_summary = build_summary(ablation_seed)
             write_csv(RESULTS / "ablation_rollouts.csv", ablation_rows)
+            write_csv(RESULTS / "ablation_seed_metrics.csv", ablation_seed)
             write_csv(RESULTS / "ablation_metrics.csv", ablation_summary)
         progress("ablation phase complete")
         return
@@ -1528,7 +1926,7 @@ def main() -> None:
         if levels_env:
             stress_levels: Iterable[float] = [float(item) for item in levels_env.split(",") if item.strip()]
         else:
-            stress_levels = [0.0, 1.0] if QUICK_MODE else np.linspace(0.0, 1.0, 6)
+            stress_levels = [0.0, 1.0] if QUICK_MODE else np.linspace(0.0, 1.2, 7)
         completed_levels = {row["stress_level"] for row in stress_raw}
         for stress_level in stress_levels:
             level_key = f"{float(stress_level):.2f}"
@@ -1563,16 +1961,68 @@ def main() -> None:
         progress("stress phase complete")
         return
 
+    if phase == "fixed_risk":
+        resume = os.getenv("PAPER76_RESUME", "0") == "1"
+        fixed_raw: List[Dict[str, str]] = read_csv(RESULTS / "fixed_risk_raw.csv") if resume and (RESULTS / "fixed_risk_raw.csv").exists() else []
+        combined = SPLIT_BY_NAME["combined_abort_stress"]
+        completed = {(row["risk_budget"], row["seed"]) for row in fixed_raw}
+        for budget in RISK_BUDGETS:
+            budget_key = f"{budget:.2f}"
+            for seed in SEEDS:
+                if (budget_key, str(seed)) in completed:
+                    progress(f"fixed-risk budget {budget_key} seed {seed} already complete")
+                    continue
+                progress(f"fixed-risk budget {budget_key} seed {seed} begin")
+                for local_idx in range(FIXED_RISK_SCENARIOS):
+                    scenario = build_scenario(
+                        combined,
+                        seed,
+                        11000 + int(1000 * budget) + local_idx,
+                        "fixed_risk",
+                        stress_level=0.55,
+                    )
+                    evidence = generate_evidence(scenario)
+                    for method in FIXED_RISK_METHODS:
+                        fixed_raw.append(evaluate_scenario(method, scenario, evidence, risk_budget=budget))
+                progress(f"fixed-risk budget {budget_key} seed {seed} complete rows={len(fixed_raw)}")
+                fixed_seed = build_fixed_risk_seed_metrics(fixed_raw)
+                fixed_summary = build_fixed_risk_summary(fixed_seed)
+                fixed_pairwise = build_fixed_risk_pairwise(fixed_seed)
+                write_csv(RESULTS / "fixed_risk_raw.csv", fixed_raw)
+                write_csv(RESULTS / "fixed_risk_seed_metrics.csv", fixed_seed)
+                write_csv(RESULTS / "fixed_risk_metrics.csv", fixed_summary)
+                write_csv(RESULTS / "fixed_risk_pairwise.csv", fixed_pairwise)
+                write_csv(FIGURES / "fixed_risk_curve_data.csv", fixed_summary)
+        if fixed_raw:
+            fixed_seed = build_fixed_risk_seed_metrics(fixed_raw)
+            fixed_summary = build_fixed_risk_summary(fixed_seed)
+            fixed_pairwise = build_fixed_risk_pairwise(fixed_seed)
+            write_csv(RESULTS / "fixed_risk_raw.csv", fixed_raw)
+            write_csv(RESULTS / "fixed_risk_seed_metrics.csv", fixed_seed)
+            write_csv(RESULTS / "fixed_risk_metrics.csv", fixed_summary)
+            write_csv(RESULTS / "fixed_risk_pairwise.csv", fixed_pairwise)
+            write_csv(FIGURES / "fixed_risk_curve_data.csv", fixed_summary)
+        progress("fixed-risk phase complete")
+        return
+
     if phase == "finalize":
         progress("finalize phase reading artifacts")
         rollout_rows = read_csv(RESULTS / "rollouts.csv")
         seed_rows = read_csv(RESULTS / "raw_seed_metrics.csv")
         summary = read_csv(RESULTS / "metrics.csv")
         pairwise = read_csv(RESULTS / "pairwise_stats.csv")
+        aggregate_seed = read_csv(RESULTS / "aggregate_seed_metrics.csv")
+        aggregate_summary = read_csv(RESULTS / "aggregate_metrics.csv")
+        aggregate_pairwise = read_csv(RESULTS / "aggregate_pairwise_stats.csv")
         ablation_rows = read_csv(RESULTS / "ablation_rollouts.csv")
+        ablation_seed = read_csv(RESULTS / "ablation_seed_metrics.csv")
         ablation_summary = read_csv(RESULTS / "ablation_metrics.csv")
         stress_raw = read_csv(RESULTS / "stress_sweep_raw.csv")
         stress_summary = read_csv(RESULTS / "stress_sweep.csv")
+        fixed_raw = read_csv(RESULTS / "fixed_risk_raw.csv")
+        fixed_seed = read_csv(RESULTS / "fixed_risk_seed_metrics.csv")
+        fixed_summary = read_csv(RESULTS / "fixed_risk_metrics.csv")
+        fixed_pairwise = read_csv(RESULTS / "fixed_risk_pairwise.csv")
         evidence_log = read_csv(RESULTS / "abort_evidence.csv")
         write_csv(RESULTS / "negative_cases.csv", negative_cases(rollout_rows))
         write_csv(
@@ -1586,15 +2036,23 @@ def main() -> None:
                     "eval_scenarios_per_split": str(EVAL_SCENARIOS),
                     "ablation_scenarios": str(ABLATION_SCENARIOS),
                     "stress_scenarios": str(STRESS_SCENARIOS),
+                    "fixed_risk_scenarios": str(FIXED_RISK_SCENARIOS),
                     "max_attempts": str(MAX_ATTEMPTS),
+                    "reference_method": REFERENCE_METHOD,
                     "splits": str(len(SPLITS)),
                     "methods": str(len(METHODS)),
                     "ablation_methods": str(len(ABLATION_METHODS)),
+                    "fixed_risk_methods": str(len(FIXED_RISK_METHODS)),
                     "main_rollout_rows": str(len(rollout_rows)),
                     "abort_evidence_rows": str(len(evidence_log)),
                     "seed_metric_rows": str(len(seed_rows)),
+                    "aggregate_seed_rows": str(len(aggregate_seed)),
+                    "aggregate_metric_rows": str(len(aggregate_summary)),
                     "ablation_rows": str(len(ablation_rows)),
+                    "ablation_seed_rows": str(len(ablation_seed)),
                     "stress_rows": str(len(stress_raw)),
+                    "fixed_risk_rows": str(len(fixed_raw)),
+                    "fixed_risk_seed_rows": str(len(fixed_seed)),
                 }
             ],
         )
@@ -1602,21 +2060,28 @@ def main() -> None:
         plot_bar(summary, "combined_abort_stress", "boundary_f1", FIGURES / "constraint_discovery_boundary_f1.png", "Paper 76 hidden-constraint boundary F1")
         plot_bar(ablation_summary, "combined_abort_stress", "success", FIGURES / "constraint_discovery_ablation_success.png", "Paper 76 abort-discovery ablations")
         plot_stress(stress_summary, FIGURES / "constraint_discovery_stress_sweep.png")
-        decision, reason = decide(summary, pairwise)
+        plot_fixed_risk(fixed_summary, FIGURES / "constraint_discovery_fixed_risk.png")
+        decision, reason = decide(summary, pairwise, aggregate_summary, aggregate_pairwise, fixed_summary, fixed_pairwise, ablation_summary, stress_summary)
         elapsed = time.time() - start_time
         combined_rows = [row for row in summary if row["split"] == "combined_abort_stress"]
+        aggregate_rows = [row for row in aggregate_summary if row["split"] == "aggregate_hard_regime"]
         with (RESULTS / "summary.txt").open("w", encoding="utf-8") as f:
-            f.write("Paper 76 constraint_discovery_from_aborted_actions real abort-physics rebuild\n")
+            f.write("Paper 76 constraint_discovery_from_aborted_actions expanded v5 abort-physics rebuild\n")
             f.write(f"Terminal recommendation: {decision}\n")
             f.write(f"Reason: {reason}\n")
             f.write(f"Main rollout rows: {len(rollout_rows)}\n")
             f.write(f"Abort evidence rows: {len(evidence_log)}\n")
             f.write(f"Seed metric rows: {len(seed_rows)}\n")
+            f.write(f"Aggregate seed rows: {len(aggregate_seed)}\n")
             f.write(f"Ablation rows: {len(ablation_rows)}\n")
+            f.write(f"Ablation seed rows: {len(ablation_seed)}\n")
             f.write(f"Stress rows: {len(stress_raw)}\n")
+            f.write(f"Fixed-risk rows: {len(fixed_raw)}\n")
+            f.write(f"Fixed-risk seed rows: {len(fixed_seed)}\n")
             f.write(f"Seeds: {SEEDS}\n")
             f.write(f"Grid size: {GRID_N}x{GRID_N}\n")
             f.write(f"Evaluation scenarios per split: {EVAL_SCENARIOS}\n")
+            f.write(f"Risk budgets: {RISK_BUDGETS}\n")
             f.write(f"Finalize runtime seconds: {elapsed:.2f}\n\n")
             f.write("Combined-abort-stress summary:\n")
             for row in sorted(combined_rows, key=lambda item: -float(item["mean_success"])):
@@ -1625,6 +2090,19 @@ def main() -> None:
                     f"abort={row['mean_aborted']} repeated={row['mean_repeated_abort']} violation={row['mean_violation']} "
                     f"boundary_f1={row['mean_boundary_f1']} iou={row['mean_boundary_iou']} "
                     f"efficiency={row['mean_path_efficiency']} area={row['mean_discovered_area']}\n"
+                )
+            f.write("\nAggregate hard-regime summary:\n")
+            for row in sorted(aggregate_rows, key=lambda item: -float(item["mean_success"])):
+                f.write(
+                    f"{row['method']} success={row['mean_success']} ci95={row['ci95_success']} "
+                    f"repeated={row['mean_repeated_abort']} violation={row['mean_violation']} "
+                    f"boundary_f1={row['mean_boundary_f1']} efficiency={row['mean_path_efficiency']} area={row['mean_discovered_area']}\n"
+                )
+            f.write("\nFixed-risk combined-abort-stress summary:\n")
+            for row in sorted([r for r in fixed_summary if r["split"] == "combined_abort_stress"], key=lambda item: (float(item["risk_budget"]), -float(item["mean_success"]))):
+                f.write(
+                    f"budget={row['risk_budget']} {row['method']} success={row['mean_success']} ci95={row['ci95_success']} "
+                    f"repeated={row['mean_repeated_abort']} violation={row['mean_violation']} efficiency={row['mean_path_efficiency']}\n"
                 )
         print(f"wrote Paper 76 abort-constraint evidence to {RESULTS}")
         print(f"terminal recommendation: {decision}")
@@ -1668,6 +2146,9 @@ def main() -> None:
     seed_rows = build_seed_metrics(rollout_rows)
     summary = build_summary(seed_rows)
     pairwise = build_pairwise(seed_rows)
+    aggregate_seed = build_aggregate_seed_metrics(seed_rows)
+    aggregate_summary = build_summary(aggregate_seed)
+    aggregate_pairwise = build_pairwise(aggregate_seed)
 
     ablation_rows: List[Dict[str, str]] = []
     combined = SPLIT_BY_NAME["combined_abort_stress"]
@@ -1684,7 +2165,7 @@ def main() -> None:
     ablation_summary = build_summary(ablation_seed)
 
     stress_raw: List[Dict[str, str]] = []
-    stress_levels: Iterable[float] = [0.0, 1.0] if QUICK_MODE else np.linspace(0.0, 1.0, 6)
+    stress_levels: Iterable[float] = [0.0, 1.0] if QUICK_MODE else np.linspace(0.0, 1.2, 7)
     for stress_level in stress_levels:
         progress(f"stress level {float(stress_level):.2f} begin")
         for seed in SEEDS:
@@ -1699,16 +2180,39 @@ def main() -> None:
     progress("building stress summaries and writing artifacts")
     stress_summary = build_stress_summary(stress_raw)
 
+    fixed_raw: List[Dict[str, str]] = []
+    for budget in RISK_BUDGETS:
+        progress(f"fixed-risk budget {budget:.2f} begin")
+        for seed in SEEDS:
+            for local_idx in range(FIXED_RISK_SCENARIOS):
+                scenario = build_scenario(combined, seed, 11000 + int(1000 * budget) + local_idx, "fixed_risk", stress_level=0.55)
+                evidence = generate_evidence(scenario)
+                for method in FIXED_RISK_METHODS:
+                    fixed_raw.append(evaluate_scenario(method, scenario, evidence, risk_budget=budget))
+        progress(f"fixed-risk budget {budget:.2f} complete rows={len(fixed_raw)}")
+    fixed_seed = build_fixed_risk_seed_metrics(fixed_raw)
+    fixed_summary = build_fixed_risk_summary(fixed_seed)
+    fixed_pairwise = build_fixed_risk_pairwise(fixed_seed)
+
     write_csv(RESULTS / "abort_evidence.csv", evidence_log)
     write_csv(RESULTS / "rollouts.csv", rollout_rows)
     write_csv(RESULTS / "raw_seed_metrics.csv", seed_rows)
     write_csv(RESULTS / "metrics.csv", summary)
     write_csv(RESULTS / "pairwise_stats.csv", pairwise)
+    write_csv(RESULTS / "aggregate_seed_metrics.csv", aggregate_seed)
+    write_csv(RESULTS / "aggregate_metrics.csv", aggregate_summary)
+    write_csv(RESULTS / "aggregate_pairwise_stats.csv", aggregate_pairwise)
     write_csv(RESULTS / "ablation_rollouts.csv", ablation_rows)
+    write_csv(RESULTS / "ablation_seed_metrics.csv", ablation_seed)
     write_csv(RESULTS / "ablation_metrics.csv", ablation_summary)
     write_csv(RESULTS / "stress_sweep_raw.csv", stress_raw)
     write_csv(RESULTS / "stress_sweep.csv", stress_summary)
     write_csv(FIGURES / "stress_curve_data.csv", stress_summary)
+    write_csv(RESULTS / "fixed_risk_raw.csv", fixed_raw)
+    write_csv(RESULTS / "fixed_risk_seed_metrics.csv", fixed_seed)
+    write_csv(RESULTS / "fixed_risk_metrics.csv", fixed_summary)
+    write_csv(RESULTS / "fixed_risk_pairwise.csv", fixed_pairwise)
+    write_csv(FIGURES / "fixed_risk_curve_data.csv", fixed_summary)
     write_csv(RESULTS / "negative_cases.csv", negative_cases(rollout_rows))
     write_csv(
         RESULTS / "training_summary.csv",
@@ -1721,14 +2225,22 @@ def main() -> None:
                 "eval_scenarios_per_split": str(EVAL_SCENARIOS),
                 "ablation_scenarios": str(ABLATION_SCENARIOS),
                 "stress_scenarios": str(STRESS_SCENARIOS),
+                "fixed_risk_scenarios": str(FIXED_RISK_SCENARIOS),
                 "max_attempts": str(MAX_ATTEMPTS),
+                "reference_method": REFERENCE_METHOD,
                 "splits": str(len(SPLITS)),
                 "methods": str(len(METHODS)),
                 "ablation_methods": str(len(ABLATION_METHODS)),
+                "fixed_risk_methods": str(len(FIXED_RISK_METHODS)),
                 "main_rollout_rows": str(len(rollout_rows)),
                 "abort_evidence_rows": str(len(evidence_log)),
+                "seed_metric_rows": str(len(seed_rows)),
+                "aggregate_seed_rows": str(len(aggregate_seed)),
                 "ablation_rows": str(len(ablation_rows)),
+                "ablation_seed_rows": str(len(ablation_seed)),
                 "stress_rows": str(len(stress_raw)),
+                "fixed_risk_rows": str(len(fixed_raw)),
+                "fixed_risk_seed_rows": str(len(fixed_seed)),
             }
         ]
         + training_rows,
@@ -1738,22 +2250,29 @@ def main() -> None:
     plot_bar(summary, "combined_abort_stress", "boundary_f1", FIGURES / "constraint_discovery_boundary_f1.png", "Paper 76 hidden-constraint boundary F1")
     plot_bar(ablation_summary, "combined_abort_stress", "success", FIGURES / "constraint_discovery_ablation_success.png", "Paper 76 abort-discovery ablations")
     plot_stress(stress_summary, FIGURES / "constraint_discovery_stress_sweep.png")
+    plot_fixed_risk(fixed_summary, FIGURES / "constraint_discovery_fixed_risk.png")
 
-    decision, reason = decide(summary, pairwise)
+    decision, reason = decide(summary, pairwise, aggregate_summary, aggregate_pairwise, fixed_summary, fixed_pairwise, ablation_summary, stress_summary)
     elapsed = time.time() - start_time
     combined_rows = [row for row in summary if row["split"] == "combined_abort_stress"]
+    aggregate_rows = [row for row in aggregate_summary if row["split"] == "aggregate_hard_regime"]
     with (RESULTS / "summary.txt").open("w", encoding="utf-8") as f:
-        f.write("Paper 76 constraint_discovery_from_aborted_actions real abort-physics rebuild\n")
+        f.write("Paper 76 constraint_discovery_from_aborted_actions expanded v5 abort-physics rebuild\n")
         f.write(f"Terminal recommendation: {decision}\n")
         f.write(f"Reason: {reason}\n")
         f.write(f"Main rollout rows: {len(rollout_rows)}\n")
         f.write(f"Abort evidence rows: {len(evidence_log)}\n")
         f.write(f"Seed metric rows: {len(seed_rows)}\n")
+        f.write(f"Aggregate seed rows: {len(aggregate_seed)}\n")
         f.write(f"Ablation rows: {len(ablation_rows)}\n")
+        f.write(f"Ablation seed rows: {len(ablation_seed)}\n")
         f.write(f"Stress rows: {len(stress_raw)}\n")
+        f.write(f"Fixed-risk rows: {len(fixed_raw)}\n")
+        f.write(f"Fixed-risk seed rows: {len(fixed_seed)}\n")
         f.write(f"Seeds: {SEEDS}\n")
         f.write(f"Grid size: {GRID_N}x{GRID_N}\n")
         f.write(f"Evaluation scenarios per split: {EVAL_SCENARIOS}\n")
+        f.write(f"Risk budgets: {RISK_BUDGETS}\n")
         f.write(f"Runtime seconds: {elapsed:.2f}\n\n")
         f.write("Combined-abort-stress summary:\n")
         for row in sorted(combined_rows, key=lambda item: -float(item["mean_success"])):
@@ -1762,6 +2281,19 @@ def main() -> None:
                 f"abort={row['mean_aborted']} repeated={row['mean_repeated_abort']} violation={row['mean_violation']} "
                 f"boundary_f1={row['mean_boundary_f1']} iou={row['mean_boundary_iou']} "
                 f"efficiency={row['mean_path_efficiency']} area={row['mean_discovered_area']}\n"
+            )
+        f.write("\nAggregate hard-regime summary:\n")
+        for row in sorted(aggregate_rows, key=lambda item: -float(item["mean_success"])):
+            f.write(
+                f"{row['method']} success={row['mean_success']} ci95={row['ci95_success']} "
+                f"repeated={row['mean_repeated_abort']} violation={row['mean_violation']} "
+                f"boundary_f1={row['mean_boundary_f1']} efficiency={row['mean_path_efficiency']} area={row['mean_discovered_area']}\n"
+            )
+        f.write("\nFixed-risk combined-abort-stress summary:\n")
+        for row in sorted([r for r in fixed_summary if r["split"] == "combined_abort_stress"], key=lambda item: (float(item["risk_budget"]), -float(item["mean_success"]))):
+            f.write(
+                f"budget={row['risk_budget']} {row['method']} success={row['mean_success']} ci95={row['ci95_success']} "
+                f"repeated={row['mean_repeated_abort']} violation={row['mean_violation']} efficiency={row['mean_path_efficiency']}\n"
             )
     print(f"wrote Paper 76 abort-constraint evidence to {RESULTS}")
     print(f"terminal recommendation: {decision}")
