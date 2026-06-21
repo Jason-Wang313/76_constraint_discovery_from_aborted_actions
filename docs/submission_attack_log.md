@@ -2,7 +2,7 @@
 
 Paper: 76 constraint_discovery_from_aborted_actions
 
-This log records the v3 ICLR main-conference archive attack. The later v4 real abort-physics rebuild superseded the v3 local-evidence failure and moved the paper to `STRONG_REVISE`, not ICLR-main-ready.
+This log records the v3 ICLR main-conference archive attack, the later v4 local positive rebuild, and the v5 expanded hostile audit. The current terminal decision is `KILL_ARCHIVE`.
 
 ## ICLR Main Gate Round 1
 Attack: No real-robot validation.
@@ -206,3 +206,17 @@ The current v4 artifacts were attacked again.
 - ICLR-main gate still fails because no hardware or external benchmark validation is present.
 
 Updated terminal action: keep `STRONG_REVISE`; do not submit as-is.
+
+## Expanded Hostile Attack 2026-06-21
+
+The current v5 artifacts were attacked under a stronger frozen protocol.
+
+- Artifact gates passed: code compile, full CSV counts, manuscript generation, BibTeX/PDF, 39-page PDF, bright citation boxes, Downloads-only artifact, public-repo-ready files, and validator checks.
+- Main hostile success gate failed: `abort_constraint_discovery_v5` reached 0.545 +/- 0.059 success on `combined_abort_stress`, while `robust_barrier_mpc` reached 0.884 +/- 0.052.
+- Aggregate hard-regime gate failed: ACD-v5 reached 0.817 success, while the strongest non-oracle baselines reached 0.962.
+- Fixed-risk gate failed at all budgets: 0.08, 0.12, 0.18, and 0.25.
+- Maximum-stress gate failed: ACD-v5 reached 0.406 success, while the best non-oracle method reached 0.734.
+- Ablation-necessity gate failed because multiple ablations matched the full v5 method.
+- Over-conservatism gate failed because safety-side reductions did not compensate for the large success and efficiency loss.
+
+Updated terminal action: `KILL_ARCHIVE`; do not submit as-is.

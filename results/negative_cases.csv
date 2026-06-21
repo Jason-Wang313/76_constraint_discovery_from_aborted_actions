@@ -1,11 +1,13 @@
 seed,scenario,layout_id,final_abort_reason,evidence_aborts,attempts,boundary_f1,path_efficiency,lesson
-0,4002,combined_abort_stress_0_4002_0,visible_collision,11,5,0.42742,0.05608,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-0,4004,combined_abort_stress_0_4004_0,collision_margin,11,5,0.44920,0.05129,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-1,4008,combined_abort_stress_1_4008_0,unstable_slip,11,5,0.51805,0.02788,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-3,4002,combined_abort_stress_3_4002_0,fixture_snag,11,5,0.43182,0.05610,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-3,4006,combined_abort_stress_3_4006_0,collision_margin,10,5,0.44930,0.06270,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-4,4006,combined_abort_stress_4_4006_0,fixture_snag,10,5,0.57143,0.04463,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-5,4005,combined_abort_stress_5_4005_0,collision_margin,11,5,0.46429,0.05414,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-5,4008,combined_abort_stress_5_4008_0,visible_collision,11,5,0.45263,0.05083,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-6,4000,combined_abort_stress_6_4000_0,collision_margin,10,5,0.44697,0.08910,abort-surface inference reduced repeated failures but did not find a safe route for this layout
-6,4004,combined_abort_stress_6_4004_0,unstable_slip,11,5,0.50075,0.02657,abort-surface inference reduced repeated failures but did not find a safe route for this layout
+0,4000,combined_abort_stress_0_4000_0,human_stop,11,6,0.49338,0.03703,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+0,4001,combined_abort_stress_0_4001_0,human_stop,11,6,0.49358,0.05607,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+0,4002,combined_abort_stress_0_4002_0,human_stop,11,6,0.41463,0.05327,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+0,4006,combined_abort_stress_0_4006_0,fixture_snag,11,6,0.41980,0.04510,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+0,4013,combined_abort_stress_0_4013_0,human_stop,11,6,0.45566,0.03083,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+1,4008,combined_abort_stress_1_4008_0,no_path,11,2,0.43130,0.24462,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+1,4011,combined_abort_stress_1_4011_0,collision_margin,11,6,0.49552,0.04396,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+1,4013,combined_abort_stress_1_4013_0,unstable_slip,11,6,0.44796,0.02386,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+2,4001,combined_abort_stress_2_4001_0,human_stop,10,6,0.44560,0.04178,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+2,4008,combined_abort_stress_2_4008_0,fixture_snag,11,6,0.48904,0.05545,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+2,4009,combined_abort_stress_2_4009_0,fixture_snag,11,6,0.45783,0.04768,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout
+2,4010,combined_abort_stress_2_4010_0,fixture_snag,11,6,0.43253,0.03981,v5 abort-surface inference reduced repeated failures but did not find a safe route for this layout

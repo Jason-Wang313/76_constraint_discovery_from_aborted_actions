@@ -1,21 +1,79 @@
-Paper 76 constraint_discovery_from_aborted_actions real abort-physics rebuild
-Terminal recommendation: STRONG_REVISE
-Reason: abort_constraint_discovery clears strongest non-oracle baseline constraint_classifier on combined_abort_stress (0.841 vs 0.508 success; paired diff 0.333+/-0.171), reduces repeated aborts by 0.175, improves boundary F1 by 0.052, and does not win by pure conservatism. It still lacks hardware and external benchmark validation, so it is not ICLR-main-ready.
-Main rollout rows: 2205
-Abort evidence rows: 2457
-Seed metric rows: 245
-Ablation rows: 294
-Stress rows: 1050
-Seeds: [0, 1, 2, 3, 4, 5, 6]
-Grid size: 38x38
-Evaluation scenarios per split: 9
-Finalize runtime seconds: 5.31
+Paper 76 constraint_discovery_from_aborted_actions expanded v5 abort-physics rebuild
+Terminal recommendation: KILL_ARCHIVE
+Reason: abort_constraint_discovery_v5 does not honestly clear the frozen local gate against strongest non-oracle baseline robust_barrier_mpc (proposed=0.545, best=0.884, paired diff=-0.339+/-0.074, violation_reduction=0.107, repeated_abort_reduction=0.080, boundary_f1_diff=0.036, efficiency_diff=-0.135, discovered_area_diff=0.040). Aggregate hard-regime diff against kernel_trace_constraint_classifier is -0.145+/-0.034; fixed-risk checks: budget 0.08: v5=0.469, best=robust_barrier_mpc:0.922; budget 0.12: v5=0.547, best=robust_barrier_mpc:0.938; budget 0.18: v5=0.500, best=particle_constraint_belief:0.938; budget 0.25: v5=0.469, best=robust_barrier_mpc:0.859; matching ablations: abort_discovery_v5_no_partial_geometry, abort_discovery_v5_no_repeated_abort_memory, abort_discovery_v5_no_safety_margin, abort_discovery_v5_no_uncertainty_quantile; max-stress v5=0.406, best_non_oracle=particle_constraint_belief:0.734. Failed gates: main_success_margin, main_paired_lower_bound, over_conservatism, aggregate_hard_regime, ablation_necessity, maximum_stress, fixed_risk.
+Main rollout rows: 6720
+Abort evidence rows: 4368
+Seed metric rows: 480
+Aggregate seed rows: 96
+Ablation rows: 800
+Ablation seed rows: 80
+Stress rows: 4032
+Fixed-risk rows: 2048
+Fixed-risk seed rows: 256
+Seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+Grid size: 40x40
+Evaluation scenarios per split: 14
+Risk budgets: [0.08, 0.12, 0.18, 0.25]
+Finalize runtime seconds: 5.12
 
 Combined-abort-stress summary:
-oracle_constraints success=0.85714 ci95=0.06222 abort=0.38095 repeated=0.22222 violation=0.36508 boundary_f1=1.00000 iou=1.00000 efficiency=0.37228 area=0.11663
-abort_constraint_discovery success=0.84127 ci95=0.06476 abort=0.57143 repeated=0.38095 violation=0.55556 boundary_f1=0.44009 iou=0.28427 efficiency=0.25067 area=0.23464
-constraint_classifier success=0.50794 ci95=0.14144 abort=0.60318 repeated=0.55556 violation=0.55556 boundary_f1=0.38829 iou=0.24223 efficiency=0.26263 area=0.25929
-risk_filter_uncertainty success=0.50794 ci95=0.06477 abort=0.79365 repeated=0.71429 violation=0.74603 boundary_f1=0.40621 iou=0.25702 efficiency=0.21277 area=0.15133
-costmap_from_collisions success=0.41270 ci95=0.06222 abort=0.77778 repeated=0.74603 violation=0.76191 boundary_f1=0.41515 iou=0.26379 efficiency=0.20119 area=0.13315
-negative_label_baseline success=0.12698 ci95=0.11072 abort=0.95238 repeated=0.88889 violation=0.95238 boundary_f1=0.24150 iou=0.13792 efficiency=0.12751 area=0.02937
-ignore_aborted_actions success=0.01587 ci95=0.03111 abort=0.98413 repeated=0.98413 violation=0.87302 boundary_f1=0.00000 iou=0.00000 efficiency=0.10816 area=0.00000
+oracle_constraints success=0.91071 ci95=0.04388 abort=0.31250 repeated=0.20536 violation=0.29464 boundary_f1=1.00000 iou=1.00000 efficiency=0.37813 area=0.11682
+robust_barrier_mpc success=0.88393 ci95=0.05250 abort=0.40179 repeated=0.25000 violation=0.36607 boundary_f1=0.39633 iou=0.24904 efficiency=0.31773 area=0.24196
+particle_constraint_belief success=0.86607 ci95=0.07215 abort=0.38393 repeated=0.25893 violation=0.32143 boundary_f1=0.39629 iou=0.24885 efficiency=0.31771 area=0.21846
+kernel_trace_constraint_classifier success=0.85714 ci95=0.05916 abort=0.50000 repeated=0.35714 violation=0.48214 boundary_f1=0.32173 iou=0.19278 efficiency=0.29548 area=0.32373
+abort_constraint_discovery success=0.73214 ci95=0.04387 abort=0.58036 repeated=0.36607 violation=0.53571 boundary_f1=0.44574 iou=0.28910 efficiency=0.24119 area=0.24723
+conformal_abort_risk_filter success=0.66072 ci95=0.05123 abort=0.50000 repeated=0.47321 violation=0.45536 boundary_f1=0.40704 iou=0.25733 efficiency=0.28436 area=0.14235
+constraint_classifier success=0.60715 ci95=0.05916 abort=0.55357 repeated=0.50893 violation=0.50000 boundary_f1=0.39264 iou=0.24599 efficiency=0.27267 area=0.25662
+abort_constraint_discovery_v5 success=0.54464 ci95=0.05879 abort=0.29464 repeated=0.16964 violation=0.25893 boundary_f1=0.43246 iou=0.27781 efficiency=0.18315 area=0.28168
+costmap_from_collisions success=0.53571 ci95=0.07000 abort=0.82143 repeated=0.70536 violation=0.77679 boundary_f1=0.42413 iou=0.27133 efficiency=0.19795 area=0.13576
+risk_filter_uncertainty success=0.50000 ci95=0.07483 abort=0.78571 repeated=0.66964 violation=0.70536 boundary_f1=0.41624 iou=0.26478 efficiency=0.20737 area=0.15259
+negative_label_baseline success=0.18750 ci95=0.06447 abort=0.94643 repeated=0.86607 violation=0.91964 boundary_f1=0.24726 iou=0.14205 efficiency=0.12339 area=0.03010
+ignore_aborted_actions success=0.02679 ci95=0.02562 abort=0.98214 repeated=0.98214 violation=0.84821 boundary_f1=0.00000 iou=0.00000 efficiency=0.09084 area=0.00000
+
+Aggregate hard-regime summary:
+kernel_trace_constraint_classifier success=0.96205 ci95=0.01678 repeated=0.12946 violation=0.21875 boundary_f1=0.29821 efficiency=0.51616 area=0.20723
+particle_constraint_belief success=0.96205 ci95=0.02237 repeated=0.10714 violation=0.16518 boundary_f1=0.37198 efficiency=0.49888 area=0.14086
+oracle_constraints success=0.95982 ci95=0.01957 repeated=0.11384 violation=0.17411 boundary_f1=1.00000 efficiency=0.56655 area=0.06544
+robust_barrier_mpc success=0.95313 ci95=0.01612 repeated=0.11161 violation=0.20536 boundary_f1=0.36245 efficiency=0.48398 area=0.16526
+abort_constraint_discovery success=0.90402 ci95=0.01864 repeated=0.15848 violation=0.27902 boundary_f1=0.42653 efficiency=0.44577 area=0.16048
+conformal_abort_risk_filter success=0.89286 ci95=0.01146 repeated=0.17411 violation=0.22991 boundary_f1=0.37741 efficiency=0.51367 area=0.08690
+constraint_classifier success=0.87500 ci95=0.01620 repeated=0.18750 violation=0.24554 boundary_f1=0.35273 efficiency=0.50653 area=0.17005
+costmap_from_collisions success=0.86161 ci95=0.01281 repeated=0.28795 violation=0.34375 boundary_f1=0.41468 efficiency=0.47872 area=0.08629
+risk_filter_uncertainty success=0.85714 ci95=0.02385 repeated=0.25893 violation=0.27679 boundary_f1=0.39551 efficiency=0.48944 area=0.09553
+abort_constraint_discovery_v5 success=0.81696 ci95=0.03013 repeated=0.07589 violation=0.14062 boundary_f1=0.40551 efficiency=0.40689 area=0.18705
+negative_label_baseline success=0.62723 ci95=0.03270 repeated=0.46652 violation=0.46875 boundary_f1=0.24301 efficiency=0.39736 area=0.01786
+ignore_aborted_actions success=0.35938 ci95=0.02237 repeated=0.66964 violation=0.56473 boundary_f1=0.00000 efficiency=0.29173 area=0.00000
+
+Fixed-risk combined-abort-stress summary:
+budget=0.08 robust_barrier_mpc success=0.92188 ci95=0.06445 repeated=0.25000 violation=0.34375 efficiency=0.25684
+budget=0.08 particle_constraint_belief success=0.90625 ci95=0.06125 repeated=0.29688 violation=0.37500 efficiency=0.26100
+budget=0.08 kernel_trace_constraint_classifier success=0.81250 ci95=0.09260 repeated=0.45312 violation=0.45312 efficiency=0.22191
+budget=0.08 oracle_constraints success=0.79688 ci95=0.10288 repeated=0.31250 violation=0.34375 efficiency=0.28625
+budget=0.08 constraint_classifier success=0.71875 ci95=0.06125 repeated=0.54688 violation=0.62500 efficiency=0.20926
+budget=0.08 conformal_abort_risk_filter success=0.64062 ci95=0.14224 repeated=0.48438 violation=0.53125 efficiency=0.21756
+budget=0.08 risk_filter_uncertainty success=0.54688 ci95=0.07936 repeated=0.76562 violation=0.79688 efficiency=0.16012
+budget=0.08 abort_constraint_discovery_v5 success=0.46875 ci95=0.15871 repeated=0.18750 violation=0.26562 efficiency=0.15971
+budget=0.12 robust_barrier_mpc success=0.93750 ci95=0.04630 repeated=0.18750 violation=0.23438 efficiency=0.30378
+budget=0.12 oracle_constraints success=0.90625 ci95=0.08966 repeated=0.23438 violation=0.32812 efficiency=0.32193
+budget=0.12 particle_constraint_belief success=0.87500 ci95=0.06548 repeated=0.23438 violation=0.26562 efficiency=0.29329
+budget=0.12 kernel_trace_constraint_classifier success=0.84375 ci95=0.15181 repeated=0.28125 violation=0.35938 efficiency=0.26064
+budget=0.12 conformal_abort_risk_filter success=0.79688 ci95=0.06445 repeated=0.28125 violation=0.35938 efficiency=0.29639
+budget=0.12 constraint_classifier success=0.79688 ci95=0.09187 repeated=0.31250 violation=0.39062 efficiency=0.27890
+budget=0.12 risk_filter_uncertainty success=0.67188 ci95=0.10288 repeated=0.62500 violation=0.71875 efficiency=0.21637
+budget=0.12 abort_constraint_discovery_v5 success=0.54688 ci95=0.16654 repeated=0.15625 violation=0.23438 efficiency=0.17558
+budget=0.18 particle_constraint_belief success=0.93750 ci95=0.04630 repeated=0.31250 violation=0.39062 efficiency=0.27193
+budget=0.18 oracle_constraints success=0.90625 ci95=0.04010 repeated=0.17188 violation=0.20312 efficiency=0.33532
+budget=0.18 kernel_trace_constraint_classifier success=0.89062 ci95=0.05551 repeated=0.29688 violation=0.45312 efficiency=0.26060
+budget=0.18 robust_barrier_mpc success=0.89062 ci95=0.07229 repeated=0.28125 violation=0.37500 efficiency=0.27274
+budget=0.18 conformal_abort_risk_filter success=0.71875 ci95=0.12029 repeated=0.46875 violation=0.51562 efficiency=0.24371
+budget=0.18 constraint_classifier success=0.65625 ci95=0.08966 repeated=0.50000 violation=0.50000 efficiency=0.23768
+budget=0.18 risk_filter_uncertainty success=0.59375 ci95=0.06125 repeated=0.64062 violation=0.73438 efficiency=0.19435
+budget=0.18 abort_constraint_discovery_v5 success=0.50000 ci95=0.11341 repeated=0.21875 violation=0.29688 efficiency=0.17337
+budget=0.25 robust_barrier_mpc success=0.85938 ci95=0.08584 repeated=0.26562 violation=0.37500 efficiency=0.28383
+budget=0.25 particle_constraint_belief success=0.81250 ci95=0.12250 repeated=0.31250 violation=0.39062 efficiency=0.27493
+budget=0.25 oracle_constraints success=0.79688 ci95=0.10288 repeated=0.31250 violation=0.35938 efficiency=0.30258
+budget=0.25 kernel_trace_constraint_classifier success=0.78125 ci95=0.13696 repeated=0.37500 violation=0.43750 efficiency=0.25268
+budget=0.25 conformal_abort_risk_filter success=0.60938 ci95=0.12627 repeated=0.53125 violation=0.56250 efficiency=0.22825
+budget=0.25 constraint_classifier success=0.54688 ci95=0.10288 repeated=0.53125 violation=0.53125 efficiency=0.22186
+budget=0.25 abort_constraint_discovery_v5 success=0.46875 ci95=0.15181 repeated=0.23438 violation=0.28125 efficiency=0.15743
+budget=0.25 risk_filter_uncertainty success=0.46875 ci95=0.12029 repeated=0.67188 violation=0.70312 efficiency=0.17842

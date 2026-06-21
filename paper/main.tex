@@ -1,129 +1,1797 @@
 \documentclass{article}
 \usepackage{iclr2026_conference,times}
 \input{math_commands.tex}
-\usepackage{hyperref}
-\usepackage{url}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{caption}
+\usepackage[colorlinks=false,pdfborder={0 0 1.6},citebordercolor={0 1 0},linkbordercolor={1 0.55 0},urlbordercolor={0 0.45 1}]{hyperref}
+\usepackage{url}
+\sloppy
+\emergencystretch=3em
 \title{Aborted Actions Reveal Hidden Constraints for Robot Replanning}
 \author{Anonymous Authors}
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Robots frequently abort actions before task completion because contact forces spike, a fixture snags, a safety margin is crossed, a human stop zone is entered, or contact becomes unstable. We test whether these aborted partial trajectories should be treated as observations of hidden constraints rather than discarded failures or endpoint-negative labels. The v4 rebuild implements a continuous 2D robot-planning benchmark with visible clutter, hidden walls, force-limit regions, human-stop zones, unstable-slip regions, closed-loop replanning, seven random seeds, strong non-oracle baselines, an oracle upper bound, ablations, stress sweeps, and negative cases. On the decisive \texttt{combined\_abort\_stress} split, \texttt{abort\_constraint\_discovery} reaches $0.841 \pm 0.065$ closed-loop success, compared with $0.508 \pm 0.141$ for a trace classifier and $0.508 \pm 0.065$ for a generic risk filter. The paired success difference versus the classifier is $0.333 \pm 0.171$. The method also reduces repeated aborts and improves hidden-boundary F1. The result is a strong local simulator result, but not an ICLR-main-ready submission: hardware and external benchmark validation remain missing.
+Robots often abort before a planned action completes.  We treat the partial trajectory, last safe state, abort point, and abort reason as evidence about hidden constraints rather than as a single failed endpoint.  The expanded v5 rebuild evaluates this idea in a continuous planning benchmark with hidden walls, fixture snags, force-limit regions, human-stop zones, unstable-slip regions, closed-loop replanning, hostile baselines, ablations, aggregate hard-regime tests, fixed-risk budgets, and stress sweeps.  The frozen terminal decision is \textbf{KILL\_ARCHIVE}.  On the decisive split, \texttt{ACD-v5} reaches $0.545 \pm 0.059$ success versus $0.884 \pm 0.052$ for the strongest non-oracle hostile baseline, \texttt{barrier-MPC}.  This document reports the result honestly: local evidence can support revision, but no local-only run is declared ICLR-main-ready without robot or accepted external benchmark validation.
 \end{abstract}
 
-\section{Decision}
-This document is the v4 ICLR-main gate for Paper 76, \emph{Constraint Discovery From Aborted Actions}. Earlier versions were killed because they relied on synthetic probability templates. The current version replaces that scaffold with a real local continuous planning benchmark and implemented competing systems. The honest decision is \textbf{STRONG/REVISE}: the mechanism is supported locally, but the paper should not be submitted to ICLR main without external validation.
+\section{Decision And Protocol}
+This manuscript is generated only from frozen CSV artifacts.  The terminal recommendation is \textbf{KILL\_ARCHIVE}.  The runner freezes the reference method as \texttt{ACD-v5}, evaluates eight seeds by default, and reports all predefined failures.  The summary reason is: \emph{abort\_constraint\_discovery\_v5 does not honestly clear the frozen local gate against strongest non-oracle baseline robust\_barrier\_mpc (proposed=0.545, best=0.884, paired diff=-0.339+/-0.074, violation\_reduction=0.107, repeated\_abort\_reduction=0.080, boundary\_f1\_diff=0.036, efficiency\_diff=-0.135, discovered\_area\_diff=0.040). Aggregate hard-regime diff against kernel\_trace\_constraint\_classifier is -0.145+/-0.034; fixed-risk checks: budget 0.08: v5=0.469, best=robust\_barrier\_mpc:0.922; budget 0.12: v5=0.547, best=robust\_barrier\_mpc:0.938; budget 0.18: v5=0.500, best=particle\_constraint\_belief:0.938; budget 0.25: v5=0.469, best=robust\_barrier\_mpc:0.859; matching ablations: abort\_discovery\_v5\_no\_partial\_geometry, abort\_discovery\_v5\_no\_repeated\_abort\_memory, abort\_discovery\_v5\_no\_safety\_margin, abort\_discovery\_v5\_no\_uncertainty\_quantile; max-stress v5=0.406, best\_non\_oracle=particle\_constraint\_belief:0.734. Failed gates: main\_success\_margin, main\_paired\_lower\_bound, over\_conservatism, aggregate\_hard\_regime, ablation\_necessity, maximum\_stress, fixed\_risk.}
 
-\section{Hypothesis}
-The hypothesis is that an aborted trajectory is a partial measurement of a constraint surface. If a robot stops because force, contact, human interruption, slip, or a joint/workspace limit is triggered, the trace before the abort gives more structure than a binary failed endpoint. A useful method should infer where the hidden constraint lies, preserve safe parts of the trace, and replan without repeatedly hitting the same failure.
+We use the local benchmark because aborted execution is hard to study from static planning labels alone.  The limitation is equally important: a diagnostic simulator is not hardware.  Therefore the strongest admissible positive decision is \textbf{STRONG\_REVISE}, not ready-to-submit.  A negative local outcome becomes \textbf{KILL\_ARCHIVE}.
 
-\section{Benchmark}
-The benchmark simulates a circular mobile manipulator or pusher in a unit-square workspace. The planner observes visible clutter but not hidden constraints. Hidden constraints include wall segments with gaps, fixture-snag segments, force-limit ellipses, human-stop disks, and unstable-slip ellipses. During execution, a continuous controller follows an A* waypoint path with observation noise and aborts when a hidden safety condition is triggered.
+\section{Problem Setting}
+The robot plans in a unit square with visible clutter and hidden constraints.  Hidden constraints include wall segments with gaps, fixture snags, force ellipses, human-stop disks, and slip ellipses.  During execution a controller follows a waypoint path and aborts when a hidden safety condition fires.  The planner then receives a partial trace, last safe point, abort point, direction, and reason label.  The task is to infer a constraint belief map and replan within a finite attempt budget.
 
-Each scenario first generates probe rollouts under visible-only planning. Those rollouts provide completed traces and aborted traces with reason labels. Each method then plans from a start to a goal, observes any new abort, updates its belief, and replans for up to five attempts. The five splits are \texttt{nominal\_known\_constraints}, \texttt{hidden\_wall\_abort}, \texttt{force\_limit\_abort}, \texttt{human\_stop\_constraint}, and \texttt{combined\_abort\_stress}.
-
-The full run contains 2,205 main rollout rows, 2,457 abort-evidence rows, 245 seed-level metric rows, 294 ablation rollout rows, and 1,050 stress-sweep raw rows. All intervals are 95 percent confidence intervals over seven seed-level means.
+\section{Relation To Prior Work}
+The work sits between motion planning \citep{lavalle2006planning}, artificial-potential and barrier planning \citep{khatib1986potential,ames2017cbf}, MPC \citep{rawlings2017mpc}, manipulation mechanics \citep{mason2001mechanics}, distributionally robust safety \citep{icra2020cvar}, stochastic safety planning \citep{icra2013stochastic}, trajectory optimization \citep{schulman2013chomp}, and human-robot safety constraints \citep{kim2018cartesian}.  The tested claim is narrower than these lines: aborted partial trajectories should be structured observations of hidden constraints, not merely failed endpoints or generic uncertainty.
 
 \section{Methods}
-The implemented methods are:
-\begin{itemize}
-\item \texttt{ignore\_aborted\_actions}: plans only with visible constraints and ignores aborted traces.
-\item \texttt{negative\_label\_baseline}: treats abort endpoints as local negative labels.
-\item \texttt{costmap\_from\_collisions}: inflates abort endpoints into a collision costmap.
-\item \texttt{risk\_filter\_uncertainty}: adds a generic conservative uncertainty/risk field.
-\item \texttt{constraint\_classifier}: classifies risky cells from positive abort-tail and negative safe-trace samples.
-\item \texttt{abort\_constraint\_discovery}: proposed method; infers finite contact surfaces, human-stop disks, force-limit ellipses, slip regions, repeated-abort structure, and safe-trace calibration from partial aborted trajectories and reason labels.
-\item \texttt{oracle\_constraints}: upper bound with true hidden constraints.
-\end{itemize}
+Baselines include visible-only planning, endpoint-negative labels, collision-cost inflation, generic risk filtering, trace classification, robust barrier MPC, conformal abort-risk filtering, kernel trace classification, particle constraint belief planning, the previous ACD-v4 method, and an oracle.  The v5 method combines reason-conditioned partial geometry, repeated-abort surface fitting, safe-trace calibration, dynamic force/slip shaping, quantile inflation under ambiguous abort evidence, and safety-aware planning parameters.
+
+\section{Theory Sketch}
+Let $\tau=(x_0,\ldots,x_T)$ be a partial trace and $a$ be the abort event.  Endpoint-only learning observes $x_T$ as negative.  ACD-v5 uses the stronger observation that a signed constraint surface lies near the segment between the last safe point and the abort point, with normal approximately aligned to the local motion direction.  Safe prefixes provide one-sided negative evidence.  Repeated aborts with related reasons identify an extended surface by fitting a tangent direction through abort points.  The theory is intentionally modest: these observations improve identifiability only when abort reasons are reliable, safe prefixes are actually safe, and hidden constraints are locally smooth.  These assumptions are exactly what the ablations and negative cases attack.
 
 \section{Main Results}
-Table~\ref{tab:main} shows the decisive combined-abort-stress split. The proposed method nearly reaches the oracle upper bound and substantially exceeds all non-oracle baselines.
-
-\begin{table}[tbp]
-\centering
 \scriptsize
-\setlength{\tabcolsep}{3pt}
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:combined}\textbf{Table \thetable: Combined-abort-stress main results}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+Method & Success & Abort & Repeated & Violation & Boundary F1 & Area \\
+\midrule
+\texttt{oracle} & $0.911 \pm 0.044$ & $0.312 \pm 0.087$ & $0.205 \pm 0.093$ & $0.295 \pm 0.093$ & $1.000 \pm 0.000$ & $0.117 \pm 0.002$ \\
+\texttt{barrier-MPC} & $0.884 \pm 0.052$ & $0.402 \pm 0.095$ & $0.250 \pm 0.046$ & $0.366 \pm 0.107$ & $0.396 \pm 0.009$ & $0.242 \pm 0.006$ \\
+\texttt{particle} & $0.866 \pm 0.072$ & $0.384 \pm 0.091$ & $0.259 \pm 0.091$ & $0.321 \pm 0.095$ & $0.396 \pm 0.010$ & $0.218 \pm 0.006$ \\
+\texttt{kernel-cls} & $0.857 \pm 0.059$ & $0.500 \pm 0.115$ & $0.357 \pm 0.099$ & $0.482 \pm 0.121$ & $0.322 \pm 0.010$ & $0.324 \pm 0.011$ \\
+\texttt{ACD-v4} & $0.732 \pm 0.044$ & $0.580 \pm 0.101$ & $0.366 \pm 0.081$ & $0.536 \pm 0.088$ & $0.446 \pm 0.012$ & $0.247 \pm 0.012$ \\
+\texttt{conformal} & $0.661 \pm 0.051$ & $0.500 \pm 0.092$ & $0.473 \pm 0.106$ & $0.455 \pm 0.079$ & $0.407 \pm 0.010$ & $0.142 \pm 0.004$ \\
+\texttt{trace-cls} & $0.607 \pm 0.059$ & $0.554 \pm 0.091$ & $0.509 \pm 0.104$ & $0.500 \pm 0.102$ & $0.393 \pm 0.010$ & $0.257 \pm 0.005$ \\
+\texttt{ACD-v5} & $0.545 \pm 0.059$ & $0.295 \pm 0.104$ & $0.170 \pm 0.079$ & $0.259 \pm 0.083$ & $0.432 \pm 0.012$ & $0.282 \pm 0.013$ \\
+\texttt{costmap} & $0.536 \pm 0.070$ & $0.821 \pm 0.059$ & $0.705 \pm 0.067$ & $0.777 \pm 0.072$ & $0.424 \pm 0.011$ & $0.136 \pm 0.004$ \\
+\texttt{risk-filter} & $0.500 \pm 0.075$ & $0.786 \pm 0.070$ & $0.670 \pm 0.087$ & $0.705 \pm 0.089$ & $0.416 \pm 0.009$ & $0.153 \pm 0.005$ \\
+\texttt{endpoint-neg} & $0.188 \pm 0.064$ & $0.946 \pm 0.035$ & $0.866 \pm 0.041$ & $0.920 \pm 0.041$ & $0.247 \pm 0.007$ & $0.030 \pm 0.001$ \\
+\texttt{ignore} & $0.027 \pm 0.026$ & $0.982 \pm 0.023$ & $0.982 \pm 0.023$ & $0.848 \pm 0.089$ & $0.000 \pm 0.000$ & $0.000 \pm 0.000$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+Against the strongest hostile non-oracle baseline, the paired success difference is $-0.339\pm 0.074$.  The oracle reaches $0.911 \pm 0.044$ success, so oracle-quality constraint inference is not claimed.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{../figures/constraint_discovery_final_success.png}
+\caption{Closed-loop success on the decisive combined-abort-stress split.}
+\end{figure}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{../figures/constraint_discovery_boundary_f1.png}
+\caption{Hidden-boundary F1 on the decisive split.}
+\end{figure}
+
+\section{Aggregate Hard Regimes}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:aggregate}\textbf{Table \thetable: Aggregate hard-regime metrics}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{lccccc}
 \toprule
-Method & Success & Repeated abort & Violation & Boundary F1 & Efficiency \\
+Method & Success & Repeated & Violation & Boundary F1 & Efficiency \\
 \midrule
-\texttt{oracle\_constraints} & $0.857 \pm 0.062$ & 0.222 & 0.365 & 1.000 & 0.372 \\
-\texttt{abort\_constraint\_discovery} & $0.841 \pm 0.065$ & 0.381 & 0.556 & 0.440 & 0.251 \\
-\texttt{constraint\_classifier} & $0.508 \pm 0.141$ & 0.556 & 0.556 & 0.388 & 0.263 \\
-\texttt{risk\_filter\_uncertainty} & $0.508 \pm 0.065$ & 0.714 & 0.746 & 0.406 & 0.213 \\
-\texttt{costmap\_from\_collisions} & $0.413 \pm 0.062$ & 0.746 & 0.762 & 0.415 & 0.201 \\
-\texttt{negative\_label\_baseline} & $0.127 \pm 0.111$ & 0.889 & 0.952 & 0.242 & 0.128 \\
-\texttt{ignore\_aborted\_actions} & $0.016 \pm 0.031$ & 0.984 & 0.873 & 0.000 & 0.108 \\
+\texttt{kernel-cls} & $0.962 \pm 0.017$ & $0.129 \pm 0.024$ & $0.219 \pm 0.039$ & $0.298 \pm 0.008$ & $0.516 \pm 0.018$ \\
+\texttt{particle} & $0.962 \pm 0.022$ & $0.107 \pm 0.035$ & $0.165 \pm 0.043$ & $0.372 \pm 0.008$ & $0.499 \pm 0.019$ \\
+\texttt{oracle} & $0.960 \pm 0.020$ & $0.114 \pm 0.025$ & $0.174 \pm 0.037$ & $1.000 \pm 0.000$ & $0.567 \pm 0.011$ \\
+\texttt{barrier-MPC} & $0.953 \pm 0.016$ & $0.112 \pm 0.022$ & $0.205 \pm 0.046$ & $0.362 \pm 0.009$ & $0.484 \pm 0.017$ \\
+\texttt{ACD-v4} & $0.904 \pm 0.019$ & $0.158 \pm 0.027$ & $0.279 \pm 0.036$ & $0.427 \pm 0.007$ & $0.446 \pm 0.008$ \\
+\texttt{conformal} & $0.893 \pm 0.011$ & $0.174 \pm 0.024$ & $0.230 \pm 0.031$ & $0.377 \pm 0.009$ & $0.514 \pm 0.013$ \\
+\texttt{trace-cls} & $0.875 \pm 0.016$ & $0.188 \pm 0.020$ & $0.246 \pm 0.048$ & $0.353 \pm 0.009$ & $0.507 \pm 0.015$ \\
+\texttt{costmap} & $0.862 \pm 0.013$ & $0.288 \pm 0.034$ & $0.344 \pm 0.051$ & $0.415 \pm 0.010$ & $0.479 \pm 0.016$ \\
+\texttt{risk-filter} & $0.857 \pm 0.024$ & $0.259 \pm 0.032$ & $0.277 \pm 0.026$ & $0.396 \pm 0.008$ & $0.489 \pm 0.011$ \\
+\texttt{ACD-v5} & $0.817 \pm 0.030$ & $0.076 \pm 0.029$ & $0.141 \pm 0.036$ & $0.406 \pm 0.007$ & $0.407 \pm 0.019$ \\
+\texttt{endpoint-neg} & $0.627 \pm 0.033$ & $0.467 \pm 0.033$ & $0.469 \pm 0.029$ & $0.243 \pm 0.009$ & $0.397 \pm 0.018$ \\
+\texttt{ignore} & $0.359 \pm 0.022$ & $0.670 \pm 0.020$ & $0.565 \pm 0.027$ & $0.000 \pm 0.000$ & $0.292 \pm 0.011$ \\
 \bottomrule
-\end{tabular}
-\caption{Combined-abort-stress results. Success is closed-loop task success after up to five replanning attempts.}
-\label{tab:main}
-\end{table}
+\end{tabular}%
+}
+\end{center}
+\normalsize
 
-The strongest non-oracle mean success is shared by \texttt{constraint\_classifier} and \texttt{risk\_filter\_uncertainty}. Against the classifier, the proposed method has a paired success difference of $0.333 \pm 0.171$, repeated-abort reduction of 0.175, and boundary-F1 improvement of 0.052. Against the risk filter, it has the same success gain, repeated-abort reduction of 0.333, violation reduction of 0.190, boundary-F1 improvement of 0.034, and efficiency improvement of 0.038.
+The aggregate paired difference against the strongest aggregate hostile baseline is $-0.145\pm 0.034$.  This table prevents cherry-picking a single combined split.
 
-\begin{figure}[tbp]
-\centering
-\includegraphics[width=0.95\linewidth]{../figures/constraint_discovery_final_success.png}
-\caption{Combined-abort-stress closed-loop success. Aborted-action constraint discovery beats endpoint, costmap, classifier, and risk-filter baselines.}
-\end{figure}
-
-\begin{figure}[tbp]
-\centering
-\includegraphics[width=0.95\linewidth]{../figures/constraint_discovery_boundary_f1.png}
-\caption{Hidden-constraint boundary F1 on the decisive split. The proposed method is not oracle-quality, but it extracts more useful boundary structure than generic trace classification.}
-\end{figure}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:aggregate-pair}\textbf{Table \thetable: Aggregate paired comparisons}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+Comparison & Succ diff & CI & Viol red & Repeat red & F1 diff & Wins \\
+\midrule
+\texttt{ACD-v4} & -0.087 & 0.028 & 0.138 & 0.083 & -0.021 & 0/8 \\
+\texttt{conformal} & -0.076 & 0.034 & 0.089 & 0.098 & 0.028 & 0/8 \\
+\texttt{trace-cls} & -0.058 & 0.030 & 0.105 & 0.112 & 0.053 & 0/8 \\
+\texttt{costmap} & -0.045 & 0.026 & 0.203 & 0.212 & -0.009 & 0/8 \\
+\texttt{ignore} & 0.458 & 0.036 & 0.424 & 0.594 & 0.406 & 8/8 \\
+\texttt{kernel-cls} & -0.145 & 0.034 & 0.078 & 0.054 & 0.107 & 0/8 \\
+\texttt{endpoint-neg} & 0.190 & 0.032 & 0.328 & 0.391 & 0.163 & 8/8 \\
+\texttt{oracle} & -0.143 & 0.034 & 0.033 & 0.038 & -0.594 & 0/8 \\
+\texttt{particle} & -0.145 & 0.039 & 0.025 & 0.031 & 0.034 & 0/8 \\
+\texttt{risk-filter} & -0.040 & 0.030 & 0.136 & 0.183 & 0.010 & 1/8 \\
+\texttt{barrier-MPC} & -0.136 & 0.038 & 0.065 & 0.036 & 0.043 & 0/8 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
 
 \section{Ablations}
-Table~\ref{tab:ablation} shows that the mechanism is not a single endpoint heuristic. Removing partial geometry causes the largest success drop. Removing abort reason labels, repeated-abort memory, safety margins, or dynamic-contact features also hurts.
-
-\begin{table}[tbp]
-\centering
 \scriptsize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{lcccc}
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:ablation}\textbf{Table \thetable: ACD-v5 ablations}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lccccc}
 \toprule
-Ablation & Success & Repeated abort & Violation & Boundary F1 \\
+Variant & Success & Repeated & Violation & Boundary F1 & Efficiency \\
 \midrule
-\texttt{full} & $0.786 \pm 0.170$ & 0.357 & 0.452 & 0.436 \\
-\texttt{no\_dynamic\_contact\_features} & $0.738 \pm 0.066$ & 0.429 & 0.524 & 0.416 \\
-\texttt{no\_repeated\_abort\_memory} & $0.738 \pm 0.120$ & 0.429 & 0.452 & 0.432 \\
-\texttt{no\_calibration} & $0.667 \pm 0.143$ & 0.381 & 0.405 & 0.420 \\
-\texttt{no\_abort\_reason\_labels} & $0.643 \pm 0.111$ & 0.524 & 0.500 & 0.366 \\
-\texttt{no\_safety\_margin} & $0.643 \pm 0.181$ & 0.452 & 0.548 & 0.433 \\
-\texttt{no\_partial\_geometry} & $0.571 \pm 0.140$ & 0.595 & 0.643 & 0.368 \\
+\texttt{no-margin} & $0.850 \pm 0.083$ & $0.312 \pm 0.131$ & $0.450 \pm 0.091$ & $0.441 \pm 0.018$ & $0.312 \pm 0.031$ \\
+\texttt{no-geom} & $0.675 \pm 0.081$ & $0.562 \pm 0.104$ & $0.588 \pm 0.108$ & $0.394 \pm 0.016$ & $0.260 \pm 0.030$ \\
+\texttt{no-quant} & $0.613 \pm 0.114$ & $0.200 \pm 0.074$ & $0.312 \pm 0.086$ & $0.414 \pm 0.019$ & $0.230 \pm 0.039$ \\
+\texttt{full-v5} & $0.600 \pm 0.111$ & $0.138 \pm 0.090$ & $0.188 \pm 0.094$ & $0.413 \pm 0.020$ & $0.206 \pm 0.035$ \\
+\texttt{no-repeat} & $0.600 \pm 0.098$ & $0.212 \pm 0.069$ & $0.300 \pm 0.098$ & $0.417 \pm 0.019$ & $0.239 \pm 0.041$ \\
+\texttt{no-barrier} & $0.588 \pm 0.131$ & $0.237 \pm 0.090$ & $0.325 \pm 0.081$ & $0.415 \pm 0.018$ & $0.230 \pm 0.039$ \\
+\texttt{endpoint} & $0.512 \pm 0.094$ & $0.750 \pm 0.091$ & $0.825 \pm 0.089$ & $0.355 \pm 0.011$ & $0.191 \pm 0.030$ \\
+\texttt{no-dyn} & $0.512 \pm 0.101$ & $0.312 \pm 0.078$ & $0.350 \pm 0.111$ & $0.403 \pm 0.020$ & $0.213 \pm 0.042$ \\
+\texttt{no-calib} & $0.475 \pm 0.116$ & $0.163 \pm 0.073$ & $0.237 \pm 0.098$ & $0.400 \pm 0.018$ & $0.177 \pm 0.037$ \\
+\texttt{no-reason} & $0.450 \pm 0.111$ & $0.138 \pm 0.090$ & $0.250 \pm 0.117$ & $0.352 \pm 0.011$ & $0.174 \pm 0.033$ \\
 \bottomrule
-\end{tabular}
-\caption{Combined-abort-stress ablations. Partial geometry and reason-aware updates are central to the result.}
-\label{tab:ablation}
-\end{table}
+\end{tabular}%
+}
+\end{center}
+\normalsize
 
-\begin{figure}[tbp]
+\begin{figure}[t]
 \centering
-\includegraphics[width=0.90\linewidth]{../figures/constraint_discovery_ablation_success.png}
-\caption{Ablation success. Endpoint-only discovery is not enough; partial geometry and reason labels matter.}
+\includegraphics[width=0.92\linewidth]{../figures/constraint_discovery_ablation_success.png}
+\caption{Mechanism ablations. Full v5 must beat component removals to support the mechanism.}
 \end{figure}
 
 \section{Stress Sweep}
-Stress sweeps vary hidden-constraint density, abort ambiguity, force/slip difficulty, and observation noise. The proposed method remains above the non-oracle baselines across the sweep, though the oracle gap persists. At stress 1.00, \texttt{abort\_constraint\_discovery} reaches $0.657 \pm 0.204$ success, while \texttt{constraint\_classifier} reaches $0.629 \pm 0.158$ and \texttt{risk\_filter\_uncertainty} reaches $0.486 \pm 0.117$.
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:stress}\textbf{Table \thetable: Stress sweep}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Method & Stress & Success & Repeated & Violation & Boundary F1 \\
+\midrule
+\texttt{ACD-v5} & 0.00 & $0.594 \pm 0.145$ & $0.141 \pm 0.056$ & $0.203 \pm 0.092$ & $0.428 \pm 0.016$ \\
+\texttt{conformal} & 0.00 & $0.703 \pm 0.079$ & $0.391 \pm 0.117$ & $0.547 \pm 0.079$ & $0.413 \pm 0.014$ \\
+\texttt{trace-cls} & 0.00 & $0.656 \pm 0.090$ & $0.453 \pm 0.122$ & $0.484 \pm 0.117$ & $0.391 \pm 0.015$ \\
+\texttt{costmap} & 0.00 & $0.516 \pm 0.134$ & $0.609 \pm 0.117$ & $0.641 \pm 0.108$ & $0.429 \pm 0.020$ \\
+\texttt{kernel-cls} & 0.00 & $0.922 \pm 0.045$ & $0.281 \pm 0.101$ & $0.359 \pm 0.117$ & $0.325 \pm 0.014$ \\
+\texttt{oracle} & 0.00 & $0.906 \pm 0.061$ & $0.141 \pm 0.086$ & $0.234 \pm 0.072$ & $1.000 \pm 0.000$ \\
+\texttt{particle} & 0.00 & $0.797 \pm 0.138$ & $0.328 \pm 0.146$ & $0.312 \pm 0.104$ & $0.399 \pm 0.016$ \\
+\texttt{risk-filter} & 0.00 & $0.547 \pm 0.138$ & $0.609 \pm 0.117$ & $0.656 \pm 0.111$ & $0.418 \pm 0.023$ \\
+\texttt{barrier-MPC} & 0.00 & $0.734 \pm 0.108$ & $0.391 \pm 0.108$ & $0.422 \pm 0.079$ & $0.395 \pm 0.016$ \\
+\texttt{ACD-v5} & 0.20 & $0.562 \pm 0.139$ & $0.203 \pm 0.079$ & $0.250 \pm 0.104$ & $0.431 \pm 0.009$ \\
+\texttt{conformal} & 0.20 & $0.672 \pm 0.079$ & $0.391 \pm 0.098$ & $0.469 \pm 0.101$ & $0.402 \pm 0.012$ \\
+\texttt{trace-cls} & 0.20 & $0.625 \pm 0.093$ & $0.469 \pm 0.090$ & $0.500 \pm 0.093$ & $0.386 \pm 0.007$ \\
+\texttt{costmap} & 0.20 & $0.547 \pm 0.079$ & $0.609 \pm 0.086$ & $0.688 \pm 0.113$ & $0.409 \pm 0.020$ \\
+\texttt{kernel-cls} & 0.20 & $0.812 \pm 0.146$ & $0.328 \pm 0.146$ & $0.406 \pm 0.120$ & $0.319 \pm 0.012$ \\
+\texttt{oracle} & 0.20 & $0.938 \pm 0.065$ & $0.156 \pm 0.061$ & $0.219 \pm 0.120$ & $1.000 \pm 0.000$ \\
+\texttt{particle} & 0.20 & $0.812 \pm 0.139$ & $0.281 \pm 0.152$ & $0.375 \pm 0.131$ & $0.388 \pm 0.013$ \\
+\texttt{risk-filter} & 0.20 & $0.547 \pm 0.122$ & $0.656 \pm 0.061$ & $0.719 \pm 0.129$ & $0.402 \pm 0.019$ \\
+\texttt{barrier-MPC} & 0.20 & $0.781 \pm 0.090$ & $0.281 \pm 0.090$ & $0.328 \pm 0.103$ & $0.385 \pm 0.013$ \\
+\texttt{ACD-v5} & 0.40 & $0.484 \pm 0.108$ & $0.250 \pm 0.093$ & $0.359 \pm 0.072$ & $0.426 \pm 0.014$ \\
+\texttt{conformal} & 0.40 & $0.547 \pm 0.146$ & $0.562 \pm 0.146$ & $0.625 \pm 0.160$ & $0.389 \pm 0.013$ \\
+\texttt{trace-cls} & 0.40 & $0.516 \pm 0.126$ & $0.578 \pm 0.122$ & $0.594 \pm 0.111$ & $0.375 \pm 0.009$ \\
+\texttt{costmap} & 0.40 & $0.500 \pm 0.139$ & $0.719 \pm 0.090$ & $0.781 \pm 0.061$ & $0.397 \pm 0.013$ \\
+\texttt{kernel-cls} & 0.40 & $0.859 \pm 0.086$ & $0.312 \pm 0.131$ & $0.422 \pm 0.138$ & $0.309 \pm 0.010$ \\
+\texttt{oracle} & 0.40 & $0.906 \pm 0.077$ & $0.234 \pm 0.157$ & $0.312 \pm 0.146$ & $1.000 \pm 0.000$ \\
+\texttt{particle} & 0.40 & $0.797 \pm 0.092$ & $0.438 \pm 0.146$ & $0.453 \pm 0.153$ & $0.374 \pm 0.013$ \\
+\texttt{risk-filter} & 0.40 & $0.500 \pm 0.104$ & $0.750 \pm 0.065$ & $0.812 \pm 0.065$ & $0.391 \pm 0.015$ \\
+\texttt{barrier-MPC} & 0.40 & $0.688 \pm 0.113$ & $0.484 \pm 0.150$ & $0.484 \pm 0.126$ & $0.371 \pm 0.011$ \\
+\texttt{ACD-v5} & 0.60 & $0.562 \pm 0.154$ & $0.156 \pm 0.077$ & $0.234 \pm 0.086$ & $0.442 \pm 0.013$ \\
+\texttt{conformal} & 0.60 & $0.656 \pm 0.111$ & $0.500 \pm 0.080$ & $0.578 \pm 0.092$ & $0.397 \pm 0.016$ \\
+\texttt{trace-cls} & 0.60 & $0.516 \pm 0.072$ & $0.578 \pm 0.079$ & $0.578 \pm 0.103$ & $0.394 \pm 0.018$ \\
+\texttt{costmap} & 0.60 & $0.500 \pm 0.080$ & $0.672 \pm 0.064$ & $0.719 \pm 0.040$ & $0.404 \pm 0.010$ \\
+\texttt{kernel-cls} & 0.60 & $0.828 \pm 0.064$ & $0.328 \pm 0.064$ & $0.422 \pm 0.103$ & $0.319 \pm 0.011$ \\
+\texttt{oracle} & 0.60 & $0.891 \pm 0.056$ & $0.266 \pm 0.086$ & $0.344 \pm 0.077$ & $1.000 \pm 0.000$ \\
+\texttt{particle} & 0.60 & $0.875 \pm 0.065$ & $0.250 \pm 0.046$ & $0.328 \pm 0.103$ & $0.384 \pm 0.013$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:stress} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Method & Stress & Success & Repeated & Violation & Boundary F1 \\
+\midrule
+\texttt{risk-filter} & 0.60 & $0.484 \pm 0.086$ & $0.719 \pm 0.090$ & $0.797 \pm 0.045$ & $0.399 \pm 0.012$ \\
+\texttt{barrier-MPC} & 0.60 & $0.859 \pm 0.098$ & $0.281 \pm 0.120$ & $0.312 \pm 0.122$ & $0.383 \pm 0.015$ \\
+\texttt{ACD-v5} & 0.80 & $0.422 \pm 0.079$ & $0.188 \pm 0.065$ & $0.406 \pm 0.120$ & $0.443 \pm 0.014$ \\
+\texttt{conformal} & 0.80 & $0.547 \pm 0.153$ & $0.516 \pm 0.126$ & $0.562 \pm 0.104$ & $0.386 \pm 0.009$ \\
+\texttt{trace-cls} & 0.80 & $0.484 \pm 0.134$ & $0.625 \pm 0.131$ & $0.672 \pm 0.122$ & $0.391 \pm 0.009$ \\
+\texttt{costmap} & 0.80 & $0.453 \pm 0.113$ & $0.719 \pm 0.077$ & $0.750 \pm 0.065$ & $0.391 \pm 0.008$ \\
+\texttt{kernel-cls} & 0.80 & $0.734 \pm 0.072$ & $0.469 \pm 0.090$ & $0.547 \pm 0.092$ & $0.315 \pm 0.009$ \\
+\texttt{oracle} & 0.80 & $0.797 \pm 0.079$ & $0.312 \pm 0.093$ & $0.391 \pm 0.117$ & $1.000 \pm 0.000$ \\
+\texttt{particle} & 0.80 & $0.766 \pm 0.098$ & $0.406 \pm 0.137$ & $0.500 \pm 0.167$ & $0.388 \pm 0.008$ \\
+\texttt{risk-filter} & 0.80 & $0.453 \pm 0.103$ & $0.672 \pm 0.122$ & $0.656 \pm 0.120$ & $0.391 \pm 0.011$ \\
+\texttt{barrier-MPC} & 0.80 & $0.688 \pm 0.104$ & $0.438 \pm 0.104$ & $0.484 \pm 0.086$ & $0.394 \pm 0.012$ \\
+\texttt{ACD-v5} & 1.00 & $0.547 \pm 0.103$ & $0.266 \pm 0.108$ & $0.375 \pm 0.113$ & $0.467 \pm 0.019$ \\
+\texttt{conformal} & 1.00 & $0.547 \pm 0.122$ & $0.547 \pm 0.138$ & $0.578 \pm 0.146$ & $0.384 \pm 0.009$ \\
+\texttt{trace-cls} & 1.00 & $0.500 \pm 0.146$ & $0.516 \pm 0.157$ & $0.578 \pm 0.185$ & $0.393 \pm 0.008$ \\
+\texttt{costmap} & 1.00 & $0.453 \pm 0.179$ & $0.766 \pm 0.108$ & $0.812 \pm 0.122$ & $0.395 \pm 0.012$ \\
+\texttt{kernel-cls} & 1.00 & $0.625 \pm 0.080$ & $0.484 \pm 0.072$ & $0.562 \pm 0.104$ & $0.320 \pm 0.012$ \\
+\texttt{oracle} & 1.00 & $0.781 \pm 0.111$ & $0.297 \pm 0.079$ & $0.375 \pm 0.093$ & $1.000 \pm 0.000$ \\
+\texttt{particle} & 1.00 & $0.750 \pm 0.104$ & $0.344 \pm 0.152$ & $0.469 \pm 0.159$ & $0.385 \pm 0.013$ \\
+\texttt{risk-filter} & 1.00 & $0.469 \pm 0.137$ & $0.703 \pm 0.138$ & $0.766 \pm 0.117$ & $0.395 \pm 0.010$ \\
+\texttt{barrier-MPC} & 1.00 & $0.828 \pm 0.103$ & $0.250 \pm 0.080$ & $0.328 \pm 0.079$ & $0.392 \pm 0.011$ \\
+\texttt{ACD-v5} & 1.20 & $0.406 \pm 0.061$ & $0.297 \pm 0.092$ & $0.375 \pm 0.104$ & $0.460 \pm 0.021$ \\
+\texttt{conformal} & 1.20 & $0.453 \pm 0.064$ & $0.578 \pm 0.079$ & $0.625 \pm 0.104$ & $0.388 \pm 0.021$ \\
+\texttt{trace-cls} & 1.20 & $0.453 \pm 0.122$ & $0.656 \pm 0.129$ & $0.641 \pm 0.142$ & $0.398 \pm 0.018$ \\
+\texttt{costmap} & 1.20 & $0.297 \pm 0.113$ & $0.781 \pm 0.101$ & $0.844 \pm 0.111$ & $0.396 \pm 0.017$ \\
+\texttt{kernel-cls} & 1.20 & $0.688 \pm 0.113$ & $0.500 \pm 0.122$ & $0.609 \pm 0.108$ & $0.318 \pm 0.012$ \\
+\texttt{oracle} & 1.20 & $0.750 \pm 0.122$ & $0.375 \pm 0.113$ & $0.438 \pm 0.080$ & $1.000 \pm 0.000$ \\
+\texttt{particle} & 1.20 & $0.734 \pm 0.126$ & $0.406 \pm 0.129$ & $0.531 \pm 0.129$ & $0.388 \pm 0.014$ \\
+\texttt{risk-filter} & 1.20 & $0.391 \pm 0.126$ & $0.750 \pm 0.080$ & $0.797 \pm 0.079$ & $0.396 \pm 0.018$ \\
+\texttt{barrier-MPC} & 1.20 & $0.609 \pm 0.117$ & $0.453 \pm 0.146$ & $0.547 \pm 0.130$ & $0.389 \pm 0.013$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
 
-\begin{figure}[tbp]
+At maximum stress 1.20, v5 reaches $0.406 \pm 0.061$ success while the strongest non-oracle stress baseline reaches $0.734 \pm 0.126$.  This gate is reported even when unfavorable.
+
+\begin{figure}[t]
 \centering
-\includegraphics[width=0.90\linewidth]{../figures/constraint_discovery_stress_sweep.png}
-\caption{Stress sweep success. The proposed method is strongest at most levels, but high-stress variance and the oracle gap motivate further validation.}
+\includegraphics[width=0.92\linewidth]{../figures/constraint_discovery_stress_sweep.png}
+\caption{Success under increasing combined abort stress.}
 \end{figure}
 
-\section{Related Work Pressure}
-Safety-constrained and risk-aware planning is crowded. Relevant pressure includes distributionally robust motion planning with CVaR safety constraints \citep{prior1}, stochastic motion planning with safety constraints \citep{prior3}, Cartesian human-robot safety constraints \citep{prior7}, planning under constraint forces \citep{prior8}, and robot task planning with safety constraints \citep{prior5,prior6}. The tested novelty is narrower: aborted partial trajectories are treated as structured observations of hidden constraints, not merely failures or costs.
+\section{Fixed-Risk Budgets}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:fixed}\textbf{Table \thetable: Fixed-risk budget metrics}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Method & Budget & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{barrier-MPC} & 0.08 & $0.922 \pm 0.064$ & $0.250 \pm 0.113$ & $0.344 \pm 0.120$ & $0.257 \pm 0.026$ \\
+\texttt{particle} & 0.08 & $0.906 \pm 0.061$ & $0.297 \pm 0.138$ & $0.375 \pm 0.173$ & $0.261 \pm 0.038$ \\
+\texttt{kernel-cls} & 0.08 & $0.812 \pm 0.093$ & $0.453 \pm 0.113$ & $0.453 \pm 0.122$ & $0.222 \pm 0.035$ \\
+\texttt{oracle} & 0.08 & $0.797 \pm 0.103$ & $0.312 \pm 0.139$ & $0.344 \pm 0.129$ & $0.286 \pm 0.039$ \\
+\texttt{trace-cls} & 0.08 & $0.719 \pm 0.061$ & $0.547 \pm 0.113$ & $0.625 \pm 0.093$ & $0.209 \pm 0.029$ \\
+\texttt{conformal} & 0.08 & $0.641 \pm 0.142$ & $0.484 \pm 0.142$ & $0.531 \pm 0.120$ & $0.218 \pm 0.047$ \\
+\texttt{risk-filter} & 0.08 & $0.547 \pm 0.079$ & $0.766 \pm 0.086$ & $0.797 \pm 0.064$ & $0.160 \pm 0.022$ \\
+\texttt{ACD-v5} & 0.08 & $0.469 \pm 0.159$ & $0.188 \pm 0.104$ & $0.266 \pm 0.126$ & $0.160 \pm 0.046$ \\
+\texttt{barrier-MPC} & 0.12 & $0.938 \pm 0.046$ & $0.188 \pm 0.080$ & $0.234 \pm 0.086$ & $0.304 \pm 0.022$ \\
+\texttt{oracle} & 0.12 & $0.906 \pm 0.090$ & $0.234 \pm 0.117$ & $0.328 \pm 0.153$ & $0.322 \pm 0.040$ \\
+\texttt{particle} & 0.12 & $0.875 \pm 0.065$ & $0.234 \pm 0.098$ & $0.266 \pm 0.086$ & $0.293 \pm 0.020$ \\
+\texttt{kernel-cls} & 0.12 & $0.844 \pm 0.152$ & $0.281 \pm 0.165$ & $0.359 \pm 0.150$ & $0.261 \pm 0.049$ \\
+\texttt{conformal} & 0.12 & $0.797 \pm 0.064$ & $0.281 \pm 0.090$ & $0.359 \pm 0.108$ & $0.296 \pm 0.025$ \\
+\texttt{trace-cls} & 0.12 & $0.797 \pm 0.092$ & $0.312 \pm 0.080$ & $0.391 \pm 0.086$ & $0.279 \pm 0.022$ \\
+\texttt{risk-filter} & 0.12 & $0.672 \pm 0.103$ & $0.625 \pm 0.093$ & $0.719 \pm 0.090$ & $0.216 \pm 0.019$ \\
+\texttt{ACD-v5} & 0.12 & $0.547 \pm 0.167$ & $0.156 \pm 0.077$ & $0.234 \pm 0.086$ & $0.176 \pm 0.039$ \\
+\texttt{particle} & 0.18 & $0.938 \pm 0.046$ & $0.312 \pm 0.104$ & $0.391 \pm 0.150$ & $0.272 \pm 0.037$ \\
+\texttt{oracle} & 0.18 & $0.906 \pm 0.040$ & $0.172 \pm 0.079$ & $0.203 \pm 0.092$ & $0.335 \pm 0.027$ \\
+\texttt{kernel-cls} & 0.18 & $0.891 \pm 0.056$ & $0.297 \pm 0.130$ & $0.453 \pm 0.122$ & $0.261 \pm 0.039$ \\
+\texttt{barrier-MPC} & 0.18 & $0.891 \pm 0.072$ & $0.281 \pm 0.120$ & $0.375 \pm 0.080$ & $0.273 \pm 0.029$ \\
+\texttt{conformal} & 0.18 & $0.719 \pm 0.120$ & $0.469 \pm 0.090$ & $0.516 \pm 0.108$ & $0.244 \pm 0.033$ \\
+\texttt{trace-cls} & 0.18 & $0.656 \pm 0.090$ & $0.500 \pm 0.154$ & $0.500 \pm 0.167$ & $0.238 \pm 0.047$ \\
+\texttt{risk-filter} & 0.18 & $0.594 \pm 0.061$ & $0.641 \pm 0.072$ & $0.734 \pm 0.098$ & $0.194 \pm 0.027$ \\
+\texttt{ACD-v5} & 0.18 & $0.500 \pm 0.113$ & $0.219 \pm 0.090$ & $0.297 \pm 0.113$ & $0.173 \pm 0.039$ \\
+\texttt{barrier-MPC} & 0.25 & $0.859 \pm 0.086$ & $0.266 \pm 0.086$ & $0.375 \pm 0.154$ & $0.284 \pm 0.031$ \\
+\texttt{particle} & 0.25 & $0.812 \pm 0.122$ & $0.312 \pm 0.131$ & $0.391 \pm 0.163$ & $0.275 \pm 0.037$ \\
+\texttt{oracle} & 0.25 & $0.797 \pm 0.103$ & $0.312 \pm 0.080$ & $0.359 \pm 0.117$ & $0.303 \pm 0.031$ \\
+\texttt{kernel-cls} & 0.25 & $0.781 \pm 0.137$ & $0.375 \pm 0.154$ & $0.438 \pm 0.154$ & $0.253 \pm 0.045$ \\
+\texttt{conformal} & 0.25 & $0.609 \pm 0.126$ & $0.531 \pm 0.077$ & $0.562 \pm 0.104$ & $0.228 \pm 0.028$ \\
+\texttt{trace-cls} & 0.25 & $0.547 \pm 0.103$ & $0.531 \pm 0.111$ & $0.531 \pm 0.111$ & $0.222 \pm 0.035$ \\
+\texttt{ACD-v5} & 0.25 & $0.469 \pm 0.152$ & $0.234 \pm 0.072$ & $0.281 \pm 0.120$ & $0.157 \pm 0.037$ \\
+\texttt{risk-filter} & 0.25 & $0.469 \pm 0.120$ & $0.672 \pm 0.122$ & $0.703 \pm 0.103$ & $0.178 \pm 0.036$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:fixed-pair}\textbf{Table \thetable: Fixed-risk paired comparisons}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llccccc}
+\toprule
+Budget & Comparison & Succ diff & CI & Viol red & Repeat red & Wins \\
+\midrule
+0.08 & \texttt{conformal} & -0.172 & 0.179 & 0.266 & 0.297 & 1/8 \\
+0.08 & \texttt{trace-cls} & -0.250 & 0.167 & 0.359 & 0.359 & 1/8 \\
+0.08 & \texttt{kernel-cls} & -0.344 & 0.178 & 0.188 & 0.266 & 1/8 \\
+0.08 & \texttt{oracle} & -0.328 & 0.212 & 0.078 & 0.125 & 1/8 \\
+0.08 & \texttt{particle} & -0.438 & 0.179 & 0.109 & 0.109 & 0/8 \\
+0.08 & \texttt{risk-filter} & -0.078 & 0.160 & 0.531 & 0.578 & 1/8 \\
+0.08 & \texttt{barrier-MPC} & -0.453 & 0.173 & 0.078 & 0.062 & 0/8 \\
+0.12 & \texttt{conformal} & -0.250 & 0.131 & 0.125 & 0.125 & 1/8 \\
+0.12 & \texttt{trace-cls} & -0.250 & 0.160 & 0.156 & 0.156 & 1/8 \\
+0.12 & \texttt{kernel-cls} & -0.297 & 0.249 & 0.125 & 0.125 & 1/8 \\
+0.12 & \texttt{oracle} & -0.359 & 0.163 & 0.094 & 0.078 & 0/8 \\
+0.12 & \texttt{particle} & -0.328 & 0.201 & 0.031 & 0.078 & 1/8 \\
+0.12 & \texttt{risk-filter} & -0.125 & 0.222 & 0.484 & 0.469 & 3/8 \\
+0.12 & \texttt{barrier-MPC} & -0.391 & 0.193 & 0.000 & 0.031 & 1/8 \\
+0.18 & \texttt{conformal} & -0.219 & 0.200 & 0.219 & 0.250 & 2/8 \\
+0.18 & \texttt{trace-cls} & -0.156 & 0.159 & 0.203 & 0.281 & 1/8 \\
+0.18 & \texttt{kernel-cls} & -0.391 & 0.117 & 0.156 & 0.078 & 0/8 \\
+0.18 & \texttt{oracle} & -0.406 & 0.137 & -0.094 & -0.047 & 0/8 \\
+0.18 & \texttt{particle} & -0.438 & 0.113 & 0.094 & 0.094 & 0/8 \\
+0.18 & \texttt{risk-filter} & -0.094 & 0.152 & 0.438 & 0.422 & 1/8 \\
+0.18 & \texttt{barrier-MPC} & -0.391 & 0.157 & 0.078 & 0.062 & 0/8 \\
+0.25 & \texttt{conformal} & -0.141 & 0.193 & 0.281 & 0.297 & 2/8 \\
+0.25 & \texttt{trace-cls} & -0.078 & 0.153 & 0.250 & 0.297 & 1/8 \\
+0.25 & \texttt{kernel-cls} & -0.312 & 0.202 & 0.156 & 0.141 & 0/8 \\
+0.25 & \texttt{oracle} & -0.328 & 0.173 & 0.078 & 0.078 & 0/8 \\
+0.25 & \texttt{particle} & -0.344 & 0.230 & 0.109 & 0.078 & 1/8 \\
+0.25 & \texttt{risk-filter} & 0.000 & 0.167 & 0.422 & 0.438 & 3/8 \\
+0.25 & \texttt{barrier-MPC} & -0.391 & 0.209 & 0.094 & 0.031 & 0/8 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.92\linewidth]{../figures/constraint_discovery_fixed_risk.png}
+\caption{Fixed-risk success across predefined budgets.}
+\end{figure}
+
+\section{Negative Cases}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:negative}\textbf{Table \thetable: Curated combined-stress negative cases}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccc}
+\toprule
+Seed & Scenario & Reason & Evidence aborts & Attempts & Boundary F1 & Efficiency \\
+\midrule
+0 & 4000 & human\_stop & 11 & 6 & 0.493 & 0.037 \\
+0 & 4001 & human\_stop & 11 & 6 & 0.494 & 0.056 \\
+0 & 4002 & human\_stop & 11 & 6 & 0.415 & 0.053 \\
+0 & 4006 & fixture\_snag & 11 & 6 & 0.420 & 0.045 \\
+0 & 4013 & human\_stop & 11 & 6 & 0.456 & 0.031 \\
+1 & 4008 & no\_path & 11 & 2 & 0.431 & 0.245 \\
+1 & 4011 & collision\_margin & 11 & 6 & 0.496 & 0.044 \\
+1 & 4013 & unstable\_slip & 11 & 6 & 0.448 & 0.024 \\
+2 & 4001 & human\_stop & 10 & 6 & 0.446 & 0.042 \\
+2 & 4008 & fixture\_snag & 11 & 6 & 0.489 & 0.055 \\
+2 & 4009 & fixture\_snag & 11 & 6 & 0.458 & 0.048 \\
+2 & 4010 & fixture\_snag & 11 & 6 & 0.433 & 0.040 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
 
 \section{Limitations}
-This is not a real robot paper. The simulator is local and diagnostic; it is not a standard external robotics benchmark. The planners are implemented and competitive within this benchmark, but they are not large neural robot policy stacks. The related-work review is still derived from the local hostile pool and must be expanded manually. The proposed method also does not reach oracle boundary quality, and its violation rate remains nontrivial on combined stress.
+The core limitations are severe enough to keep the paper out of ready-to-submit status.  There is no real robot experiment, no accepted external robotics benchmark, no released neural policy checkpoint, and no human-robot safety dataset.  The local benchmark can falsify the mechanism, but it cannot by itself prove deployment value.  The planner also depends on meaningful abort reasons; if those labels are noisy or adversarial, the surface inference can become overconfident.
 
 \section{Conclusion}
-The v4 rebuild converts a generated idea into a real empirical result. Aborted actions do reveal hidden constraints in this local benchmark, and using partial geometry plus abort reason labels improves closed-loop replanning. The correct decision is \textbf{STRONG/REVISE}: promising enough to continue, not ready enough to submit.
+Aborted actions can contain more information than endpoint-negative labels.  The expanded v5 artifact tests that claim with hostile baselines, fixed-risk budgets, stress sweeps, and ablations.  The correct final decision is the one printed above, not a submission-ready claim.
+
+\appendix
+\section{Protocol Checklist}
+\begin{itemize}
+\item CPU-only and RAM-light execution.
+\item Frozen reference: \texttt{ACD-v5}.
+\item Frozen decisive split: \texttt{combined\_abort\_stress}.
+\item Frozen aggregate: hidden-wall, force-limit, human-stop, and combined stress.
+\item Frozen risk budgets: [0.08, 0.12, 0.18, 0.25].
+\item Bright boxed citation links.
+\item Numbered PDF copied only to Downloads.
+\end{itemize}
+
+\section{All Main Metrics}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:all-main}\textbf{Table \thetable: All split-by-method metrics}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llccccc}
+\toprule
+Method & Split & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{oracle} & \texttt{combined} & $0.911 \pm 0.044$ & $0.205 \pm 0.093$ & $0.295 \pm 0.093$ & $1.000 \pm 0.000$ & $0.378 \pm 0.024$ \\
+\texttt{barrier-MPC} & \texttt{combined} & $0.884 \pm 0.052$ & $0.250 \pm 0.046$ & $0.366 \pm 0.107$ & $0.396 \pm 0.009$ & $0.318 \pm 0.024$ \\
+\texttt{particle} & \texttt{combined} & $0.866 \pm 0.072$ & $0.259 \pm 0.091$ & $0.321 \pm 0.095$ & $0.396 \pm 0.010$ & $0.318 \pm 0.036$ \\
+\texttt{kernel-cls} & \texttt{combined} & $0.857 \pm 0.059$ & $0.357 \pm 0.099$ & $0.482 \pm 0.121$ & $0.322 \pm 0.010$ & $0.295 \pm 0.037$ \\
+\texttt{ACD-v4} & \texttt{combined} & $0.732 \pm 0.044$ & $0.366 \pm 0.081$ & $0.536 \pm 0.088$ & $0.446 \pm 0.012$ & $0.241 \pm 0.027$ \\
+\texttt{conformal} & \texttt{combined} & $0.661 \pm 0.051$ & $0.473 \pm 0.106$ & $0.455 \pm 0.079$ & $0.407 \pm 0.010$ & $0.284 \pm 0.031$ \\
+\texttt{trace-cls} & \texttt{combined} & $0.607 \pm 0.059$ & $0.509 \pm 0.104$ & $0.500 \pm 0.102$ & $0.393 \pm 0.010$ & $0.273 \pm 0.031$ \\
+\texttt{ACD-v5} & \texttt{combined} & $0.545 \pm 0.059$ & $0.170 \pm 0.079$ & $0.259 \pm 0.083$ & $0.432 \pm 0.012$ & $0.183 \pm 0.023$ \\
+\texttt{costmap} & \texttt{combined} & $0.536 \pm 0.070$ & $0.705 \pm 0.067$ & $0.777 \pm 0.072$ & $0.424 \pm 0.011$ & $0.198 \pm 0.022$ \\
+\texttt{risk-filter} & \texttt{combined} & $0.500 \pm 0.075$ & $0.670 \pm 0.087$ & $0.705 \pm 0.089$ & $0.416 \pm 0.009$ & $0.207 \pm 0.035$ \\
+\texttt{endpoint-neg} & \texttt{combined} & $0.188 \pm 0.064$ & $0.866 \pm 0.041$ & $0.920 \pm 0.041$ & $0.247 \pm 0.007$ & $0.123 \pm 0.019$ \\
+\texttt{ignore} & \texttt{combined} & $0.027 \pm 0.026$ & $0.982 \pm 0.023$ & $0.848 \pm 0.089$ & $0.000 \pm 0.000$ & $0.091 \pm 0.010$ \\
+\texttt{ACD-v4} & \texttt{force} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.045 \pm 0.045$ & $0.426 \pm 0.014$ & $0.579 \pm 0.018$ \\
+\texttt{ACD-v5} & \texttt{force} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.036 \pm 0.037$ & $0.386 \pm 0.012$ & $0.560 \pm 0.017$ \\
+\texttt{conformal} & \texttt{force} & $1.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.062 \pm 0.032$ & $0.347 \pm 0.018$ & $0.660 \pm 0.013$ \\
+\texttt{trace-cls} & \texttt{force} & $1.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.089 \pm 0.051$ & $0.354 \pm 0.016$ & $0.648 \pm 0.025$ \\
+\texttt{costmap} & \texttt{force} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.054 \pm 0.044$ & $0.383 \pm 0.018$ & $0.667 \pm 0.013$ \\
+\texttt{kernel-cls} & \texttt{force} & $1.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.098 \pm 0.052$ & $0.305 \pm 0.013$ & $0.640 \pm 0.019$ \\
+\texttt{particle} & \texttt{force} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.045 \pm 0.045$ & $0.369 \pm 0.014$ & $0.617 \pm 0.015$ \\
+\texttt{risk-filter} & \texttt{force} & $1.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.071 \pm 0.037$ & $0.366 \pm 0.015$ & $0.660 \pm 0.007$ \\
+\texttt{barrier-MPC} & \texttt{force} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.045 \pm 0.037$ & $0.345 \pm 0.014$ & $0.596 \pm 0.023$ \\
+\texttt{endpoint-neg} & \texttt{force} & $0.973 \pm 0.037$ & $0.116 \pm 0.052$ & $0.179 \pm 0.070$ & $0.184 \pm 0.015$ & $0.638 \pm 0.030$ \\
+\texttt{oracle} & \texttt{force} & $0.955 \pm 0.037$ & $0.125 \pm 0.074$ & $0.179 \pm 0.092$ & $1.000 \pm 0.000$ & $0.628 \pm 0.033$ \\
+\texttt{ignore} & \texttt{force} & $0.714 \pm 0.070$ & $0.321 \pm 0.070$ & $0.375 \pm 0.058$ & $0.000 \pm 0.000$ & $0.517 \pm 0.036$ \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & $0.991 \pm 0.018$ & $0.134 \pm 0.049$ & $0.214 \pm 0.059$ & $0.257 \pm 0.006$ & $0.567 \pm 0.025$ \\
+\texttt{oracle} & \texttt{hidden-wall} & $0.982 \pm 0.035$ & $0.062 \pm 0.041$ & $0.071 \pm 0.046$ & $1.000 \pm 0.000$ & $0.663 \pm 0.023$ \\
+\texttt{particle} & \texttt{hidden-wall} & $0.982 \pm 0.023$ & $0.134 \pm 0.056$ & $0.196 \pm 0.091$ & $0.353 \pm 0.010$ & $0.540 \pm 0.037$ \\
+\texttt{risk-filter} & \texttt{hidden-wall} & $0.929 \pm 0.053$ & $0.268 \pm 0.087$ & $0.304 \pm 0.069$ & $0.432 \pm 0.009$ & $0.532 \pm 0.035$ \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & $0.929 \pm 0.037$ & $0.170 \pm 0.070$ & $0.304 \pm 0.098$ & $0.348 \pm 0.009$ & $0.519 \pm 0.036$ \\
+\texttt{conformal} & \texttt{hidden-wall} & $0.911 \pm 0.023$ & $0.179 \pm 0.046$ & $0.250 \pm 0.059$ & $0.430 \pm 0.010$ & $0.565 \pm 0.032$ \\
+\texttt{costmap} & \texttt{hidden-wall} & $0.911 \pm 0.051$ & $0.357 \pm 0.059$ & $0.420 \pm 0.072$ & $0.469 \pm 0.007$ & $0.496 \pm 0.039$ \\
+\texttt{trace-cls} & \texttt{hidden-wall} & $0.893 \pm 0.037$ & $0.170 \pm 0.052$ & $0.259 \pm 0.095$ & $0.310 \pm 0.007$ & $0.561 \pm 0.037$ \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & $0.884 \pm 0.052$ & $0.223 \pm 0.056$ & $0.366 \pm 0.056$ & $0.345 \pm 0.009$ & $0.446 \pm 0.024$ \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & $0.723 \pm 0.104$ & $0.089 \pm 0.058$ & $0.125 \pm 0.069$ & $0.319 \pm 0.012$ & $0.375 \pm 0.060$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:all-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llccccc}
+\toprule
+Method & Split & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{endpoint-neg} & \texttt{hidden-wall} & $0.464 \pm 0.079$ & $0.670 \pm 0.083$ & $0.714 \pm 0.065$ & $0.374 \pm 0.011$ & $0.315 \pm 0.044$ \\
+\texttt{ignore} & \texttt{hidden-wall} & $0.134 \pm 0.049$ & $0.893 \pm 0.046$ & $0.902 \pm 0.052$ & $0.000 \pm 0.000$ & $0.174 \pm 0.034$ \\
+\texttt{ACD-v4} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.045 \pm 0.045$ & $0.170 \pm 0.059$ & $0.489 \pm 0.021$ & $0.517 \pm 0.017$ \\
+\texttt{ACD-v5} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.045 \pm 0.026$ & $0.143 \pm 0.065$ & $0.485 \pm 0.022$ & $0.510 \pm 0.018$ \\
+\texttt{conformal} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.036 \pm 0.037$ & $0.152 \pm 0.041$ & $0.326 \pm 0.017$ & $0.545 \pm 0.023$ \\
+\texttt{trace-cls} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.062 \pm 0.056$ & $0.134 \pm 0.032$ & $0.354 \pm 0.015$ & $0.544 \pm 0.025$ \\
+\texttt{costmap} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.089 \pm 0.069$ & $0.125 \pm 0.058$ & $0.382 \pm 0.019$ & $0.554 \pm 0.020$ \\
+\texttt{kernel-cls} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.018 \pm 0.023$ & $0.080 \pm 0.032$ & $0.309 \pm 0.012$ & $0.562 \pm 0.022$ \\
+\texttt{particle} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.036 \pm 0.037$ & $0.098 \pm 0.037$ & $0.370 \pm 0.013$ & $0.521 \pm 0.027$ \\
+\texttt{risk-filter} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.089 \pm 0.063$ & $0.027 \pm 0.026$ & $0.368 \pm 0.020$ & $0.559 \pm 0.023$ \\
+\texttt{barrier-MPC} & \texttt{human-stop} & $1.000 \pm 0.000$ & $0.027 \pm 0.026$ & $0.107 \pm 0.046$ & $0.360 \pm 0.011$ & $0.503 \pm 0.023$ \\
+\texttt{oracle} & \texttt{human-stop} & $0.991 \pm 0.018$ & $0.062 \pm 0.041$ & $0.152 \pm 0.049$ & $1.000 \pm 0.000$ & $0.597 \pm 0.012$ \\
+\texttt{endpoint-neg} & \texttt{human-stop} & $0.884 \pm 0.064$ & $0.214 \pm 0.065$ & $0.062 \pm 0.032$ & $0.166 \pm 0.019$ & $0.514 \pm 0.040$ \\
+\texttt{ignore} & \texttt{human-stop} & $0.562 \pm 0.056$ & $0.482 \pm 0.051$ & $0.134 \pm 0.081$ & $0.000 \pm 0.000$ & $0.384 \pm 0.030$ \\
+\texttt{ACD-v4} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.777 \pm 0.085$ & $0.876 \pm 0.007$ \\
+\texttt{ACD-v5} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.777 \pm 0.093$ & $0.875 \pm 0.008$ \\
+\texttt{conformal} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.786 \pm 0.088$ & $0.869 \pm 0.009$ \\
+\texttt{trace-cls} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.018 \pm 0.023$ & $0.768 \pm 0.091$ & $0.868 \pm 0.013$ \\
+\texttt{costmap} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.786 \pm 0.088$ & $0.874 \pm 0.011$ \\
+\texttt{ignore} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.009 \pm 0.018$ & $1.000 \pm 0.000$ & $0.877 \pm 0.009$ \\
+\texttt{kernel-cls} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.018 \pm 0.023$ & $0.777 \pm 0.093$ & $0.862 \pm 0.014$ \\
+\texttt{endpoint-neg} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.018 \pm 0.023$ & $0.768 \pm 0.091$ & $0.865 \pm 0.010$ \\
+\texttt{oracle} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.018 \pm 0.023$ & $0.054 \pm 0.044$ & $1.000 \pm 0.000$ & $0.860 \pm 0.015$ \\
+\texttt{particle} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.786 \pm 0.088$ & $0.862 \pm 0.012$ \\
+\texttt{risk-filter} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.777 \pm 0.093$ & $0.868 \pm 0.010$ \\
+\texttt{barrier-MPC} & \texttt{nominal} & $1.000 \pm 0.000$ & $0.000 \pm 0.000$ & $0.009 \pm 0.018$ & $0.777 \pm 0.085$ & $0.856 \pm 0.016$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+\section{All Main Pairwise Comparisons}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:all-pair}\textbf{Table \thetable: All paired comparisons versus ACD-v5}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llcccccc}
+\toprule
+Split & Comparison & Succ diff & CI & Viol red & Repeat red & F1 diff & Wins \\
+\midrule
+\texttt{combined} & \texttt{ACD-v4} & -0.188 & 0.059 & 0.277 & 0.196 & -0.013 & 0/8 \\
+\texttt{combined} & \texttt{conformal} & -0.116 & 0.064 & 0.196 & 0.304 & 0.025 & 1/8 \\
+\texttt{combined} & \texttt{trace-cls} & -0.062 & 0.062 & 0.241 & 0.339 & 0.040 & 2/8 \\
+\texttt{combined} & \texttt{costmap} & 0.009 & 0.089 & 0.518 & 0.536 & 0.008 & 3/8 \\
+\texttt{combined} & \texttt{ignore} & 0.518 & 0.078 & 0.589 & 0.812 & 0.432 & 8/8 \\
+\texttt{combined} & \texttt{kernel-cls} & -0.312 & 0.064 & 0.223 & 0.188 & 0.111 & 0/8 \\
+\texttt{combined} & \texttt{endpoint-neg} & 0.357 & 0.070 & 0.661 & 0.696 & 0.185 & 8/8 \\
+\texttt{combined} & \texttt{oracle} & -0.366 & 0.056 & 0.036 & 0.036 & -0.568 & 0/8 \\
+\texttt{combined} & \texttt{particle} & -0.321 & 0.065 & 0.062 & 0.089 & 0.036 & 0/8 \\
+\texttt{combined} & \texttt{risk-filter} & 0.045 & 0.075 & 0.446 & 0.500 & 0.016 & 5/8 \\
+\texttt{combined} & \texttt{barrier-MPC} & -0.339 & 0.074 & 0.107 & 0.080 & 0.036 & 0/8 \\
+\texttt{force} & \texttt{ACD-v4} & 0.000 & 0.000 & 0.009 & 0.000 & -0.040 & 0/8 \\
+\texttt{force} & \texttt{conformal} & 0.000 & 0.000 & 0.027 & 0.009 & 0.039 & 0/8 \\
+\texttt{force} & \texttt{trace-cls} & 0.000 & 0.000 & 0.054 & 0.009 & 0.032 & 0/8 \\
+\texttt{force} & \texttt{costmap} & 0.000 & 0.000 & 0.018 & 0.000 & 0.003 & 0/8 \\
+\texttt{force} & \texttt{ignore} & 0.286 & 0.070 & 0.339 & 0.321 & 0.386 & 8/8 \\
+\texttt{force} & \texttt{kernel-cls} & 0.000 & 0.000 & 0.062 & 0.009 & 0.082 & 0/8 \\
+\texttt{force} & \texttt{endpoint-neg} & 0.027 & 0.037 & 0.143 & 0.116 & 0.202 & 2/8 \\
+\texttt{force} & \texttt{oracle} & 0.045 & 0.037 & 0.143 & 0.125 & -0.614 & 4/8 \\
+\texttt{force} & \texttt{particle} & 0.000 & 0.000 & 0.009 & 0.000 & 0.018 & 0/8 \\
+\texttt{force} & \texttt{risk-filter} & 0.000 & 0.000 & 0.036 & 0.009 & 0.020 & 0/8 \\
+\texttt{force} & \texttt{barrier-MPC} & 0.000 & 0.000 & 0.009 & 0.000 & 0.041 & 0/8 \\
+\texttt{hidden-wall} & \texttt{ACD-v4} & -0.161 & 0.078 & 0.241 & 0.134 & -0.026 & 0/8 \\
+\texttt{hidden-wall} & \texttt{conformal} & -0.188 & 0.112 & 0.125 & 0.089 & -0.112 & 0/8 \\
+\texttt{hidden-wall} & \texttt{trace-cls} & -0.170 & 0.083 & 0.134 & 0.080 & 0.008 & 0/8 \\
+\texttt{hidden-wall} & \texttt{costmap} & -0.188 & 0.102 & 0.295 & 0.268 & -0.151 & 1/8 \\
+\texttt{hidden-wall} & \texttt{ignore} & 0.589 & 0.102 & 0.777 & 0.804 & 0.319 & 8/8 \\
+\texttt{hidden-wall} & \texttt{kernel-cls} & -0.268 & 0.105 & 0.089 & 0.045 & 0.061 & 0/8 \\
+\texttt{hidden-wall} & \texttt{endpoint-neg} & 0.259 & 0.140 & 0.589 & 0.580 & -0.056 & 8/8 \\
+\texttt{hidden-wall} & \texttt{oracle} & -0.259 & 0.109 & -0.054 & -0.027 & -0.681 & 0/8 \\
+\texttt{hidden-wall} & \texttt{particle} & -0.259 & 0.112 & 0.071 & 0.045 & -0.034 & 0/8 \\
+\texttt{hidden-wall} & \texttt{risk-filter} & -0.205 & 0.128 & 0.179 & 0.179 & -0.114 & 1/8 \\
+\texttt{hidden-wall} & \texttt{barrier-MPC} & -0.205 & 0.114 & 0.179 & 0.080 & -0.029 & 0/8 \\
+\texttt{human-stop} & \texttt{ACD-v4} & 0.000 & 0.000 & 0.027 & 0.000 & -0.005 & 0/8 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:all-pair} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llcccccc}
+\toprule
+Split & Comparison & Succ diff & CI & Viol red & Repeat red & F1 diff & Wins \\
+\midrule
+\texttt{human-stop} & \texttt{conformal} & 0.000 & 0.000 & 0.009 & -0.009 & 0.159 & 0/8 \\
+\texttt{human-stop} & \texttt{trace-cls} & 0.000 & 0.000 & -0.009 & 0.018 & 0.131 & 0/8 \\
+\texttt{human-stop} & \texttt{costmap} & 0.000 & 0.000 & -0.018 & 0.045 & 0.102 & 0/8 \\
+\texttt{human-stop} & \texttt{ignore} & 0.438 & 0.056 & -0.009 & 0.438 & 0.485 & 8/8 \\
+\texttt{human-stop} & \texttt{kernel-cls} & 0.000 & 0.000 & -0.062 & -0.027 & 0.176 & 0/8 \\
+\texttt{human-stop} & \texttt{endpoint-neg} & 0.116 & 0.064 & -0.080 & 0.170 & 0.319 & 7/8 \\
+\texttt{human-stop} & \texttt{oracle} & 0.009 & 0.018 & 0.009 & 0.018 & -0.515 & 1/8 \\
+\texttt{human-stop} & \texttt{particle} & 0.000 & 0.000 & -0.045 & -0.009 & 0.114 & 0/8 \\
+\texttt{human-stop} & \texttt{risk-filter} & 0.000 & 0.000 & -0.116 & 0.045 & 0.117 & 0/8 \\
+\texttt{human-stop} & \texttt{barrier-MPC} & 0.000 & 0.000 & -0.036 & -0.018 & 0.125 & 0/8 \\
+\texttt{nominal} & \texttt{ACD-v4} & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0/8 \\
+\texttt{nominal} & \texttt{conformal} & 0.000 & 0.000 & -0.009 & 0.000 & -0.009 & 0/8 \\
+\texttt{nominal} & \texttt{trace-cls} & 0.000 & 0.000 & 0.009 & 0.000 & 0.009 & 0/8 \\
+\texttt{nominal} & \texttt{costmap} & 0.000 & 0.000 & 0.000 & 0.000 & -0.009 & 0/8 \\
+\texttt{nominal} & \texttt{ignore} & 0.000 & 0.000 & 0.000 & 0.000 & -0.223 & 0/8 \\
+\texttt{nominal} & \texttt{kernel-cls} & 0.000 & 0.000 & 0.009 & 0.000 & 0.000 & 0/8 \\
+\texttt{nominal} & \texttt{endpoint-neg} & 0.000 & 0.000 & 0.009 & 0.009 & 0.009 & 0/8 \\
+\texttt{nominal} & \texttt{oracle} & 0.000 & 0.000 & 0.045 & 0.018 & -0.223 & 0/8 \\
+\texttt{nominal} & \texttt{particle} & 0.000 & 0.000 & -0.009 & 0.000 & -0.009 & 0/8 \\
+\texttt{nominal} & \texttt{risk-filter} & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0/8 \\
+\texttt{nominal} & \texttt{barrier-MPC} & 0.000 & 0.000 & 0.000 & 0.000 & 0.000 & 0/8 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+\section{Seed-Level Main Metrics}
+\tiny
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:seed-main}\textbf{Table \thetable: Seed-level main metrics}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{ACD-v4} & \texttt{combined} & 0 & 14 & 0.643 & 0.500 & 0.571 & 0.463 & 0.222 \\
+\texttt{ACD-v4} & \texttt{combined} & 1 & 14 & 0.786 & 0.214 & 0.500 & 0.411 & 0.281 \\
+\texttt{ACD-v4} & \texttt{combined} & 2 & 14 & 0.714 & 0.286 & 0.357 & 0.452 & 0.297 \\
+\texttt{ACD-v4} & \texttt{combined} & 3 & 14 & 0.786 & 0.357 & 0.571 & 0.427 & 0.225 \\
+\texttt{ACD-v4} & \texttt{combined} & 4 & 14 & 0.786 & 0.286 & 0.571 & 0.455 & 0.251 \\
+\texttt{ACD-v4} & \texttt{combined} & 5 & 14 & 0.714 & 0.286 & 0.429 & 0.448 & 0.249 \\
+\texttt{ACD-v4} & \texttt{combined} & 6 & 14 & 0.786 & 0.500 & 0.500 & 0.452 & 0.236 \\
+\texttt{ACD-v4} & \texttt{combined} & 7 & 14 & 0.643 & 0.500 & 0.786 & 0.458 & 0.168 \\
+\texttt{ACD-v5} & \texttt{combined} & 0 & 14 & 0.429 & 0.214 & 0.286 & 0.436 & 0.180 \\
+\texttt{ACD-v5} & \texttt{combined} & 1 & 14 & 0.429 & 0.071 & 0.143 & 0.398 & 0.166 \\
+\texttt{ACD-v5} & \texttt{combined} & 2 & 14 & 0.500 & 0.214 & 0.214 & 0.443 & 0.167 \\
+\texttt{ACD-v5} & \texttt{combined} & 3 & 14 & 0.643 & 0.071 & 0.143 & 0.418 & 0.175 \\
+\texttt{ACD-v5} & \texttt{combined} & 4 & 14 & 0.571 & 0.071 & 0.143 & 0.446 & 0.153 \\
+\texttt{ACD-v5} & \texttt{combined} & 5 & 14 & 0.571 & 0.357 & 0.429 & 0.432 & 0.205 \\
+\texttt{ACD-v5} & \texttt{combined} & 6 & 14 & 0.643 & 0.071 & 0.286 & 0.442 & 0.255 \\
+\texttt{ACD-v5} & \texttt{combined} & 7 & 14 & 0.571 & 0.286 & 0.429 & 0.445 & 0.164 \\
+\texttt{conformal} & \texttt{combined} & 0 & 14 & 0.571 & 0.714 & 0.571 & 0.415 & 0.218 \\
+\texttt{conformal} & \texttt{combined} & 1 & 14 & 0.643 & 0.643 & 0.643 & 0.384 & 0.249 \\
+\texttt{conformal} & \texttt{combined} & 2 & 14 & 0.643 & 0.500 & 0.500 & 0.406 & 0.271 \\
+\texttt{conformal} & \texttt{combined} & 3 & 14 & 0.714 & 0.429 & 0.429 & 0.390 & 0.295 \\
+\texttt{conformal} & \texttt{combined} & 4 & 14 & 0.714 & 0.286 & 0.286 & 0.418 & 0.350 \\
+\texttt{conformal} & \texttt{combined} & 5 & 14 & 0.786 & 0.286 & 0.429 & 0.401 & 0.335 \\
+\texttt{conformal} & \texttt{combined} & 6 & 14 & 0.571 & 0.500 & 0.357 & 0.424 & 0.259 \\
+\texttt{conformal} & \texttt{combined} & 7 & 14 & 0.643 & 0.429 & 0.429 & 0.418 & 0.300 \\
+\texttt{trace-cls} & \texttt{combined} & 0 & 14 & 0.500 & 0.714 & 0.571 & 0.398 & 0.213 \\
+\texttt{trace-cls} & \texttt{combined} & 1 & 14 & 0.500 & 0.643 & 0.643 & 0.381 & 0.239 \\
+\texttt{trace-cls} & \texttt{combined} & 2 & 14 & 0.643 & 0.643 & 0.643 & 0.386 & 0.243 \\
+\texttt{trace-cls} & \texttt{combined} & 3 & 14 & 0.571 & 0.500 & 0.571 & 0.370 & 0.267 \\
+\texttt{trace-cls} & \texttt{combined} & 4 & 14 & 0.714 & 0.286 & 0.286 & 0.404 & 0.359 \\
+\texttt{trace-cls} & \texttt{combined} & 5 & 14 & 0.714 & 0.357 & 0.571 & 0.389 & 0.295 \\
+\texttt{trace-cls} & \texttt{combined} & 6 & 14 & 0.571 & 0.429 & 0.286 & 0.414 & 0.290 \\
+\texttt{trace-cls} & \texttt{combined} & 7 & 14 & 0.643 & 0.500 & 0.429 & 0.399 & 0.276 \\
+\texttt{costmap} & \texttt{combined} & 0 & 14 & 0.500 & 0.786 & 0.857 & 0.439 & 0.177 \\
+\texttt{costmap} & \texttt{combined} & 1 & 14 & 0.429 & 0.857 & 0.929 & 0.403 & 0.150 \\
+\texttt{costmap} & \texttt{combined} & 2 & 14 & 0.643 & 0.714 & 0.857 & 0.419 & 0.201 \\
+\texttt{costmap} & \texttt{combined} & 3 & 14 & 0.429 & 0.714 & 0.714 & 0.400 & 0.187 \\
+\texttt{costmap} & \texttt{combined} & 4 & 14 & 0.571 & 0.571 & 0.643 & 0.435 & 0.251 \\
+\texttt{costmap} & \texttt{combined} & 5 & 14 & 0.500 & 0.714 & 0.786 & 0.423 & 0.192 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{costmap} & \texttt{combined} & 6 & 14 & 0.500 & 0.714 & 0.643 & 0.438 & 0.191 \\
+\texttt{costmap} & \texttt{combined} & 7 & 14 & 0.714 & 0.571 & 0.786 & 0.436 & 0.235 \\
+\texttt{ignore} & \texttt{combined} & 0 & 14 & 0.071 & 0.929 & 0.643 & 0.000 & 0.115 \\
+\texttt{ignore} & \texttt{combined} & 1 & 14 & 0.071 & 0.929 & 0.714 & 0.000 & 0.111 \\
+\texttt{ignore} & \texttt{combined} & 2 & 14 & 0.000 & 1.000 & 0.786 & 0.000 & 0.080 \\
+\texttt{ignore} & \texttt{combined} & 3 & 14 & 0.000 & 1.000 & 1.000 & 0.000 & 0.092 \\
+\texttt{ignore} & \texttt{combined} & 4 & 14 & 0.000 & 1.000 & 1.000 & 0.000 & 0.078 \\
+\texttt{ignore} & \texttt{combined} & 5 & 14 & 0.000 & 1.000 & 0.929 & 0.000 & 0.083 \\
+\texttt{ignore} & \texttt{combined} & 6 & 14 & 0.000 & 1.000 & 0.857 & 0.000 & 0.085 \\
+\texttt{ignore} & \texttt{combined} & 7 & 14 & 0.071 & 1.000 & 0.857 & 0.000 & 0.083 \\
+\texttt{kernel-cls} & \texttt{combined} & 0 & 14 & 0.786 & 0.429 & 0.643 & 0.323 & 0.250 \\
+\texttt{kernel-cls} & \texttt{combined} & 1 & 14 & 0.714 & 0.571 & 0.714 & 0.316 & 0.225 \\
+\texttt{kernel-cls} & \texttt{combined} & 2 & 14 & 0.929 & 0.357 & 0.429 & 0.310 & 0.305 \\
+\texttt{kernel-cls} & \texttt{combined} & 3 & 14 & 0.786 & 0.357 & 0.429 & 0.297 & 0.293 \\
+\texttt{kernel-cls} & \texttt{combined} & 4 & 14 & 0.929 & 0.071 & 0.143 & 0.340 & 0.399 \\
+\texttt{kernel-cls} & \texttt{combined} & 5 & 14 & 0.929 & 0.357 & 0.500 & 0.321 & 0.302 \\
+\texttt{kernel-cls} & \texttt{combined} & 6 & 14 & 0.857 & 0.429 & 0.571 & 0.327 & 0.263 \\
+\texttt{kernel-cls} & \texttt{combined} & 7 & 14 & 0.929 & 0.286 & 0.429 & 0.340 & 0.327 \\
+\texttt{endpoint-neg} & \texttt{combined} & 0 & 14 & 0.143 & 0.857 & 0.929 & 0.248 & 0.112 \\
+\texttt{endpoint-neg} & \texttt{combined} & 1 & 14 & 0.143 & 0.857 & 0.857 & 0.237 & 0.120 \\
+\texttt{endpoint-neg} & \texttt{combined} & 2 & 14 & 0.143 & 0.929 & 0.857 & 0.250 & 0.110 \\
+\texttt{endpoint-neg} & \texttt{combined} & 3 & 14 & 0.286 & 0.786 & 0.857 & 0.239 & 0.172 \\
+\texttt{endpoint-neg} & \texttt{combined} & 4 & 14 & 0.071 & 0.929 & 1.000 & 0.257 & 0.089 \\
+\texttt{endpoint-neg} & \texttt{combined} & 5 & 14 & 0.357 & 0.786 & 0.929 & 0.236 & 0.158 \\
+\texttt{endpoint-neg} & \texttt{combined} & 6 & 14 & 0.143 & 0.929 & 0.929 & 0.266 & 0.113 \\
+\texttt{endpoint-neg} & \texttt{combined} & 7 & 14 & 0.214 & 0.857 & 1.000 & 0.245 & 0.113 \\
+\texttt{oracle} & \texttt{combined} & 0 & 14 & 0.929 & 0.143 & 0.286 & 1.000 & 0.381 \\
+\texttt{oracle} & \texttt{combined} & 1 & 14 & 0.786 & 0.500 & 0.571 & 1.000 & 0.306 \\
+\texttt{oracle} & \texttt{combined} & 2 & 14 & 0.929 & 0.214 & 0.357 & 1.000 & 0.375 \\
+\texttt{oracle} & \texttt{combined} & 3 & 14 & 0.929 & 0.071 & 0.143 & 1.000 & 0.429 \\
+\texttt{oracle} & \texttt{combined} & 4 & 14 & 0.857 & 0.143 & 0.286 & 1.000 & 0.376 \\
+\texttt{oracle} & \texttt{combined} & 5 & 14 & 1.000 & 0.143 & 0.143 & 1.000 & 0.403 \\
+\texttt{oracle} & \texttt{combined} & 6 & 14 & 0.929 & 0.143 & 0.286 & 1.000 & 0.378 \\
+\texttt{oracle} & \texttt{combined} & 7 & 14 & 0.929 & 0.286 & 0.286 & 1.000 & 0.377 \\
+\texttt{particle} & \texttt{combined} & 0 & 14 & 0.786 & 0.500 & 0.571 & 0.398 & 0.241 \\
+\texttt{particle} & \texttt{combined} & 1 & 14 & 0.714 & 0.286 & 0.357 & 0.382 & 0.272 \\
+\texttt{particle} & \texttt{combined} & 2 & 14 & 0.857 & 0.214 & 0.214 & 0.386 & 0.325 \\
+\texttt{particle} & \texttt{combined} & 3 & 14 & 0.929 & 0.286 & 0.357 & 0.375 & 0.321 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{particle} & \texttt{combined} & 4 & 14 & 1.000 & 0.071 & 0.143 & 0.417 & 0.409 \\
+\texttt{particle} & \texttt{combined} & 5 & 14 & 1.000 & 0.143 & 0.286 & 0.395 & 0.326 \\
+\texttt{particle} & \texttt{combined} & 6 & 14 & 0.786 & 0.357 & 0.429 & 0.412 & 0.287 \\
+\texttt{particle} & \texttt{combined} & 7 & 14 & 0.857 & 0.214 & 0.214 & 0.405 & 0.358 \\
+\texttt{risk-filter} & \texttt{combined} & 0 & 14 & 0.357 & 0.857 & 0.857 & 0.431 & 0.129 \\
+\texttt{risk-filter} & \texttt{combined} & 1 & 14 & 0.500 & 0.714 & 0.786 & 0.399 & 0.212 \\
+\texttt{risk-filter} & \texttt{combined} & 2 & 14 & 0.429 & 0.714 & 0.643 & 0.412 & 0.178 \\
+\texttt{risk-filter} & \texttt{combined} & 3 & 14 & 0.429 & 0.714 & 0.786 & 0.396 & 0.196 \\
+\texttt{risk-filter} & \texttt{combined} & 4 & 14 & 0.643 & 0.429 & 0.571 & 0.425 & 0.304 \\
+\texttt{risk-filter} & \texttt{combined} & 5 & 14 & 0.429 & 0.714 & 0.857 & 0.413 & 0.182 \\
+\texttt{risk-filter} & \texttt{combined} & 6 & 14 & 0.571 & 0.571 & 0.571 & 0.423 & 0.228 \\
+\texttt{risk-filter} & \texttt{combined} & 7 & 14 & 0.643 & 0.643 & 0.571 & 0.431 & 0.229 \\
+\texttt{barrier-MPC} & \texttt{combined} & 0 & 14 & 0.786 & 0.357 & 0.500 & 0.399 & 0.270 \\
+\texttt{barrier-MPC} & \texttt{combined} & 1 & 14 & 0.929 & 0.214 & 0.643 & 0.386 & 0.275 \\
+\texttt{barrier-MPC} & \texttt{combined} & 2 & 14 & 0.929 & 0.214 & 0.286 & 0.380 & 0.349 \\
+\texttt{barrier-MPC} & \texttt{combined} & 3 & 14 & 0.929 & 0.214 & 0.286 & 0.379 & 0.329 \\
+\texttt{barrier-MPC} & \texttt{combined} & 4 & 14 & 1.000 & 0.143 & 0.143 & 0.411 & 0.372 \\
+\texttt{barrier-MPC} & \texttt{combined} & 5 & 14 & 0.857 & 0.286 & 0.286 & 0.395 & 0.304 \\
+\texttt{barrier-MPC} & \texttt{combined} & 6 & 14 & 0.857 & 0.286 & 0.357 & 0.412 & 0.318 \\
+\texttt{barrier-MPC} & \texttt{combined} & 7 & 14 & 0.786 & 0.286 & 0.429 & 0.407 & 0.323 \\
+\texttt{ACD-v4} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.417 & 0.579 \\
+\texttt{ACD-v4} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.420 & 0.577 \\
+\texttt{ACD-v4} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.392 & 0.599 \\
+\texttt{ACD-v4} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.143 & 0.445 & 0.542 \\
+\texttt{ACD-v4} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.456 & 0.615 \\
+\texttt{ACD-v4} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.427 & 0.565 \\
+\texttt{ACD-v4} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.413 & 0.551 \\
+\texttt{ACD-v4} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.143 & 0.438 & 0.604 \\
+\texttt{ACD-v5} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.071 & 0.378 & 0.540 \\
+\texttt{ACD-v5} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.071 & 0.381 & 0.562 \\
+\texttt{ACD-v5} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.359 & 0.597 \\
+\texttt{ACD-v5} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.000 & 0.410 & 0.532 \\
+\texttt{ACD-v5} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.407 & 0.590 \\
+\texttt{ACD-v5} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.395 & 0.544 \\
+\texttt{ACD-v5} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.370 & 0.540 \\
+\texttt{ACD-v5} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.143 & 0.390 & 0.576 \\
+\texttt{conformal} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.071 & 0.364 & 0.647 \\
+\texttt{conformal} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.071 & 0.326 & 0.648 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{conformal} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.331 & 0.685 \\
+\texttt{conformal} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.315 & 0.663 \\
+\texttt{conformal} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.143 & 0.337 & 0.654 \\
+\texttt{conformal} & \texttt{force} & 5 & 14 & 1.000 & 0.071 & 0.071 & 0.353 & 0.629 \\
+\texttt{conformal} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.071 & 0.397 & 0.671 \\
+\texttt{conformal} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.352 & 0.683 \\
+\texttt{trace-cls} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.367 & 0.652 \\
+\texttt{trace-cls} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.214 & 0.324 & 0.593 \\
+\texttt{trace-cls} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.071 & 0.343 & 0.663 \\
+\texttt{trace-cls} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.323 & 0.679 \\
+\texttt{trace-cls} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.143 & 0.357 & 0.627 \\
+\texttt{trace-cls} & \texttt{force} & 5 & 14 & 1.000 & 0.071 & 0.143 & 0.383 & 0.620 \\
+\texttt{trace-cls} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.071 & 0.354 & 0.644 \\
+\texttt{trace-cls} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.384 & 0.706 \\
+\texttt{costmap} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.399 & 0.666 \\
+\texttt{costmap} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.143 & 0.362 & 0.642 \\
+\texttt{costmap} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.143 & 0.352 & 0.646 \\
+\texttt{costmap} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.373 & 0.662 \\
+\texttt{costmap} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.385 & 0.699 \\
+\texttt{costmap} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.071 & 0.371 & 0.662 \\
+\texttt{costmap} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.435 & 0.676 \\
+\texttt{costmap} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.385 & 0.685 \\
+\texttt{ignore} & \texttt{force} & 0 & 14 & 0.643 & 0.500 & 0.500 & 0.000 & 0.468 \\
+\texttt{ignore} & \texttt{force} & 1 & 14 & 0.643 & 0.357 & 0.429 & 0.000 & 0.472 \\
+\texttt{ignore} & \texttt{force} & 2 & 14 & 0.714 & 0.286 & 0.286 & 0.000 & 0.531 \\
+\texttt{ignore} & \texttt{force} & 3 & 14 & 0.714 & 0.286 & 0.429 & 0.000 & 0.526 \\
+\texttt{ignore} & \texttt{force} & 4 & 14 & 0.857 & 0.214 & 0.357 & 0.000 & 0.571 \\
+\texttt{ignore} & \texttt{force} & 5 & 14 & 0.571 & 0.429 & 0.429 & 0.000 & 0.444 \\
+\texttt{ignore} & \texttt{force} & 6 & 14 & 0.714 & 0.286 & 0.286 & 0.000 & 0.541 \\
+\texttt{ignore} & \texttt{force} & 7 & 14 & 0.857 & 0.214 & 0.286 & 0.000 & 0.588 \\
+\texttt{kernel-cls} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.311 & 0.669 \\
+\texttt{kernel-cls} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.143 & 0.300 & 0.618 \\
+\texttt{kernel-cls} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.143 & 0.274 & 0.637 \\
+\texttt{kernel-cls} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.214 & 0.291 & 0.595 \\
+\texttt{kernel-cls} & \texttt{force} & 4 & 14 & 1.000 & 0.071 & 0.071 & 0.288 & 0.661 \\
+\texttt{kernel-cls} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.143 & 0.326 & 0.616 \\
+\texttt{kernel-cls} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.324 & 0.658 \\
+\texttt{kernel-cls} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.071 & 0.323 & 0.665 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{endpoint-neg} & \texttt{force} & 0 & 14 & 0.857 & 0.143 & 0.357 & 0.213 & 0.574 \\
+\texttt{endpoint-neg} & \texttt{force} & 1 & 14 & 1.000 & 0.214 & 0.214 & 0.203 & 0.602 \\
+\texttt{endpoint-neg} & \texttt{force} & 2 & 14 & 0.929 & 0.143 & 0.143 & 0.177 & 0.622 \\
+\texttt{endpoint-neg} & \texttt{force} & 3 & 14 & 1.000 & 0.071 & 0.143 & 0.197 & 0.646 \\
+\texttt{endpoint-neg} & \texttt{force} & 4 & 14 & 1.000 & 0.071 & 0.143 & 0.151 & 0.659 \\
+\texttt{endpoint-neg} & \texttt{force} & 5 & 14 & 1.000 & 0.214 & 0.214 & 0.181 & 0.635 \\
+\texttt{endpoint-neg} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.195 & 0.719 \\
+\texttt{endpoint-neg} & \texttt{force} & 7 & 14 & 1.000 & 0.071 & 0.214 & 0.157 & 0.644 \\
+\texttt{oracle} & \texttt{force} & 0 & 14 & 0.929 & 0.214 & 0.286 & 1.000 & 0.591 \\
+\texttt{oracle} & \texttt{force} & 1 & 14 & 1.000 & 0.071 & 0.143 & 1.000 & 0.651 \\
+\texttt{oracle} & \texttt{force} & 2 & 14 & 1.000 & 0.071 & 0.143 & 1.000 & 0.660 \\
+\texttt{oracle} & \texttt{force} & 3 & 14 & 0.929 & 0.143 & 0.214 & 1.000 & 0.623 \\
+\texttt{oracle} & \texttt{force} & 4 & 14 & 0.929 & 0.214 & 0.286 & 1.000 & 0.586 \\
+\texttt{oracle} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.689 \\
+\texttt{oracle} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.671 \\
+\texttt{oracle} & \texttt{force} & 7 & 14 & 0.857 & 0.286 & 0.357 & 1.000 & 0.554 \\
+\texttt{particle} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.071 & 0.381 & 0.612 \\
+\texttt{particle} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.341 & 0.611 \\
+\texttt{particle} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.143 & 0.343 & 0.589 \\
+\texttt{particle} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.143 & 0.354 & 0.593 \\
+\texttt{particle} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.372 & 0.636 \\
+\texttt{particle} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.381 & 0.639 \\
+\texttt{particle} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.388 & 0.607 \\
+\texttt{particle} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.388 & 0.649 \\
+\texttt{risk-filter} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.383 & 0.669 \\
+\texttt{risk-filter} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.143 & 0.357 & 0.638 \\
+\texttt{risk-filter} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.071 & 0.337 & 0.664 \\
+\texttt{risk-filter} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.000 & 0.357 & 0.669 \\
+\texttt{risk-filter} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.369 & 0.657 \\
+\texttt{risk-filter} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.143 & 0.354 & 0.657 \\
+\texttt{risk-filter} & \texttt{force} & 6 & 14 & 1.000 & 0.071 & 0.071 & 0.408 & 0.656 \\
+\texttt{risk-filter} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.071 & 0.361 & 0.670 \\
+\texttt{barrier-MPC} & \texttt{force} & 0 & 14 & 1.000 & 0.000 & 0.143 & 0.345 & 0.534 \\
+\texttt{barrier-MPC} & \texttt{force} & 1 & 14 & 1.000 & 0.000 & 0.071 & 0.314 & 0.591 \\
+\texttt{barrier-MPC} & \texttt{force} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.328 & 0.639 \\
+\texttt{barrier-MPC} & \texttt{force} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.327 & 0.578 \\
+\texttt{barrier-MPC} & \texttt{force} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.364 & 0.629 \\
+\texttt{barrier-MPC} & \texttt{force} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.357 & 0.607 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{barrier-MPC} & \texttt{force} & 6 & 14 & 1.000 & 0.000 & 0.071 & 0.363 & 0.580 \\
+\texttt{barrier-MPC} & \texttt{force} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.365 & 0.611 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 0 & 14 & 0.786 & 0.286 & 0.357 & 0.331 & 0.404 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 1 & 14 & 1.000 & 0.214 & 0.286 & 0.336 & 0.456 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 2 & 14 & 0.857 & 0.286 & 0.429 & 0.346 & 0.415 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 3 & 14 & 0.857 & 0.071 & 0.429 & 0.351 & 0.441 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 4 & 14 & 0.786 & 0.286 & 0.357 & 0.336 & 0.417 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 5 & 14 & 0.929 & 0.286 & 0.286 & 0.369 & 0.470 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 6 & 14 & 0.929 & 0.143 & 0.286 & 0.334 & 0.506 \\
+\texttt{ACD-v4} & \texttt{hidden-wall} & 7 & 14 & 0.929 & 0.214 & 0.500 & 0.356 & 0.462 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 0 & 14 & 0.714 & 0.214 & 0.143 & 0.303 & 0.331 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 1 & 14 & 0.857 & 0.143 & 0.214 & 0.306 & 0.438 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 2 & 14 & 0.500 & 0.143 & 0.143 & 0.324 & 0.265 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 3 & 14 & 0.643 & 0.000 & 0.000 & 0.326 & 0.347 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 4 & 14 & 0.571 & 0.071 & 0.143 & 0.308 & 0.269 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 5 & 14 & 0.714 & 0.000 & 0.000 & 0.354 & 0.390 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 6 & 14 & 0.857 & 0.000 & 0.071 & 0.302 & 0.495 \\
+\texttt{ACD-v5} & \texttt{hidden-wall} & 7 & 14 & 0.929 & 0.143 & 0.286 & 0.326 & 0.462 \\
+\texttt{conformal} & \texttt{hidden-wall} & 0 & 14 & 0.929 & 0.071 & 0.286 & 0.423 & 0.591 \\
+\texttt{conformal} & \texttt{hidden-wall} & 1 & 14 & 0.857 & 0.214 & 0.286 & 0.404 & 0.483 \\
+\texttt{conformal} & \texttt{hidden-wall} & 2 & 14 & 0.929 & 0.214 & 0.214 & 0.435 & 0.553 \\
+\texttt{conformal} & \texttt{hidden-wall} & 3 & 14 & 0.929 & 0.214 & 0.357 & 0.442 & 0.551 \\
+\texttt{conformal} & \texttt{hidden-wall} & 4 & 14 & 0.929 & 0.143 & 0.143 & 0.426 & 0.625 \\
+\texttt{conformal} & \texttt{hidden-wall} & 5 & 14 & 0.857 & 0.286 & 0.357 & 0.446 & 0.527 \\
+\texttt{conformal} & \texttt{hidden-wall} & 6 & 14 & 0.929 & 0.143 & 0.214 & 0.422 & 0.588 \\
+\texttt{conformal} & \texttt{hidden-wall} & 7 & 14 & 0.929 & 0.143 & 0.143 & 0.444 & 0.604 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 0 & 14 & 0.929 & 0.071 & 0.286 & 0.307 & 0.598 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 1 & 14 & 0.857 & 0.214 & 0.429 & 0.296 & 0.479 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 2 & 14 & 0.857 & 0.214 & 0.214 & 0.305 & 0.553 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 3 & 14 & 0.857 & 0.143 & 0.357 & 0.305 & 0.528 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 4 & 14 & 0.857 & 0.143 & 0.143 & 0.315 & 0.619 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 5 & 14 & 0.857 & 0.214 & 0.286 & 0.320 & 0.537 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 6 & 14 & 0.929 & 0.286 & 0.357 & 0.305 & 0.537 \\
+\texttt{trace-cls} & \texttt{hidden-wall} & 7 & 14 & 1.000 & 0.071 & 0.000 & 0.329 & 0.640 \\
+\texttt{costmap} & \texttt{hidden-wall} & 0 & 14 & 0.857 & 0.429 & 0.500 & 0.463 & 0.458 \\
+\texttt{costmap} & \texttt{hidden-wall} & 1 & 14 & 0.929 & 0.500 & 0.571 & 0.450 & 0.434 \\
+\texttt{costmap} & \texttt{hidden-wall} & 2 & 14 & 0.786 & 0.357 & 0.429 & 0.474 & 0.451 \\
+\texttt{costmap} & \texttt{hidden-wall} & 3 & 14 & 1.000 & 0.214 & 0.357 & 0.476 & 0.589 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{costmap} & \texttt{hidden-wall} & 4 & 14 & 0.929 & 0.286 & 0.286 & 0.475 & 0.525 \\
+\texttt{costmap} & \texttt{hidden-wall} & 5 & 14 & 0.929 & 0.357 & 0.500 & 0.463 & 0.484 \\
+\texttt{costmap} & \texttt{hidden-wall} & 6 & 14 & 1.000 & 0.357 & 0.286 & 0.485 & 0.560 \\
+\texttt{costmap} & \texttt{hidden-wall} & 7 & 14 & 0.857 & 0.357 & 0.429 & 0.470 & 0.463 \\
+\texttt{ignore} & \texttt{hidden-wall} & 0 & 14 & 0.214 & 0.857 & 0.857 & 0.000 & 0.193 \\
+\texttt{ignore} & \texttt{hidden-wall} & 1 & 14 & 0.071 & 0.929 & 1.000 & 0.000 & 0.124 \\
+\texttt{ignore} & \texttt{hidden-wall} & 2 & 14 & 0.071 & 1.000 & 1.000 & 0.000 & 0.117 \\
+\texttt{ignore} & \texttt{hidden-wall} & 3 & 14 & 0.214 & 0.857 & 0.857 & 0.000 & 0.227 \\
+\texttt{ignore} & \texttt{hidden-wall} & 4 & 14 & 0.071 & 0.929 & 0.929 & 0.000 & 0.145 \\
+\texttt{ignore} & \texttt{hidden-wall} & 5 & 14 & 0.071 & 0.929 & 0.929 & 0.000 & 0.148 \\
+\texttt{ignore} & \texttt{hidden-wall} & 6 & 14 & 0.214 & 0.786 & 0.786 & 0.000 & 0.249 \\
+\texttt{ignore} & \texttt{hidden-wall} & 7 & 14 & 0.143 & 0.857 & 0.857 & 0.000 & 0.194 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 0 & 14 & 0.929 & 0.214 & 0.286 & 0.248 & 0.537 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 1 & 14 & 1.000 & 0.143 & 0.357 & 0.246 & 0.504 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 2 & 14 & 1.000 & 0.000 & 0.214 & 0.265 & 0.578 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 3 & 14 & 1.000 & 0.143 & 0.214 & 0.252 & 0.571 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 4 & 14 & 1.000 & 0.143 & 0.214 & 0.258 & 0.614 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 5 & 14 & 1.000 & 0.071 & 0.071 & 0.261 & 0.564 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 6 & 14 & 1.000 & 0.214 & 0.214 & 0.262 & 0.561 \\
+\texttt{kernel-cls} & \texttt{hidden-wall} & 7 & 14 & 1.000 & 0.143 & 0.143 & 0.268 & 0.608 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 0 & 14 & 0.571 & 0.643 & 0.714 & 0.367 & 0.332 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 1 & 14 & 0.357 & 0.714 & 0.714 & 0.371 & 0.274 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 2 & 14 & 0.429 & 0.714 & 0.714 & 0.402 & 0.321 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 3 & 14 & 0.500 & 0.643 & 0.786 & 0.381 & 0.331 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 4 & 14 & 0.429 & 0.643 & 0.714 & 0.358 & 0.312 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 5 & 14 & 0.500 & 0.714 & 0.786 & 0.354 & 0.288 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 6 & 14 & 0.643 & 0.429 & 0.500 & 0.390 & 0.441 \\
+\texttt{endpoint-neg} & \texttt{hidden-wall} & 7 & 14 & 0.286 & 0.857 & 0.786 & 0.373 & 0.221 \\
+\texttt{oracle} & \texttt{hidden-wall} & 0 & 14 & 0.857 & 0.143 & 0.143 & 1.000 & 0.616 \\
+\texttt{oracle} & \texttt{hidden-wall} & 1 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.695 \\
+\texttt{oracle} & \texttt{hidden-wall} & 2 & 14 & 1.000 & 0.071 & 0.143 & 1.000 & 0.633 \\
+\texttt{oracle} & \texttt{hidden-wall} & 3 & 14 & 1.000 & 0.143 & 0.143 & 1.000 & 0.648 \\
+\texttt{oracle} & \texttt{hidden-wall} & 4 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.709 \\
+\texttt{oracle} & \texttt{hidden-wall} & 5 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.696 \\
+\texttt{oracle} & \texttt{hidden-wall} & 6 & 14 & 1.000 & 0.071 & 0.071 & 1.000 & 0.657 \\
+\texttt{oracle} & \texttt{hidden-wall} & 7 & 14 & 1.000 & 0.071 & 0.071 & 1.000 & 0.649 \\
+\texttt{particle} & \texttt{hidden-wall} & 0 & 14 & 0.929 & 0.286 & 0.357 & 0.336 & 0.494 \\
+\texttt{particle} & \texttt{hidden-wall} & 1 & 14 & 0.929 & 0.214 & 0.357 & 0.326 & 0.445 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{particle} & \texttt{hidden-wall} & 2 & 14 & 1.000 & 0.071 & 0.286 & 0.356 & 0.552 \\
+\texttt{particle} & \texttt{hidden-wall} & 3 & 14 & 1.000 & 0.143 & 0.143 & 0.355 & 0.538 \\
+\texttt{particle} & \texttt{hidden-wall} & 4 & 14 & 1.000 & 0.071 & 0.071 & 0.353 & 0.584 \\
+\texttt{particle} & \texttt{hidden-wall} & 5 & 14 & 1.000 & 0.071 & 0.000 & 0.367 & 0.572 \\
+\texttt{particle} & \texttt{hidden-wall} & 6 & 14 & 1.000 & 0.143 & 0.214 & 0.357 & 0.519 \\
+\texttt{particle} & \texttt{hidden-wall} & 7 & 14 & 1.000 & 0.071 & 0.143 & 0.371 & 0.612 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 0 & 14 & 0.786 & 0.357 & 0.286 & 0.417 & 0.500 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 1 & 14 & 0.929 & 0.429 & 0.357 & 0.413 & 0.465 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 2 & 14 & 1.000 & 0.214 & 0.286 & 0.451 & 0.540 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 3 & 14 & 0.929 & 0.143 & 0.214 & 0.436 & 0.584 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 4 & 14 & 0.929 & 0.357 & 0.500 & 0.434 & 0.512 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 5 & 14 & 1.000 & 0.071 & 0.214 & 0.424 & 0.614 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 6 & 14 & 1.000 & 0.214 & 0.214 & 0.445 & 0.549 \\
+\texttt{risk-filter} & \texttt{hidden-wall} & 7 & 14 & 0.857 & 0.357 & 0.357 & 0.436 & 0.491 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 0 & 14 & 0.929 & 0.286 & 0.429 & 0.342 & 0.508 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 1 & 14 & 0.857 & 0.214 & 0.429 & 0.318 & 0.452 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 2 & 14 & 0.857 & 0.214 & 0.286 & 0.349 & 0.506 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 3 & 14 & 0.929 & 0.286 & 0.500 & 0.348 & 0.445 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 4 & 14 & 1.000 & 0.143 & 0.286 & 0.351 & 0.565 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 5 & 14 & 1.000 & 0.000 & 0.071 & 0.358 & 0.596 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 6 & 14 & 0.929 & 0.143 & 0.214 & 0.356 & 0.538 \\
+\texttt{barrier-MPC} & \texttt{hidden-wall} & 7 & 14 & 0.929 & 0.071 & 0.214 & 0.362 & 0.546 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.000 & 0.214 & 0.475 & 0.525 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.000 & 0.143 & 0.480 & 0.563 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.000 & 0.071 & 0.500 & 0.497 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.000 & 0.143 & 0.478 & 0.518 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.143 & 0.143 & 0.506 & 0.494 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.000 & 0.286 & 0.435 & 0.515 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.143 & 0.286 & 0.537 & 0.488 \\
+\texttt{ACD-v4} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.071 & 0.071 & 0.505 & 0.534 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.071 & 0.214 & 0.466 & 0.528 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.480 & 0.565 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.000 & 0.071 & 0.488 & 0.485 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.000 & 0.143 & 0.488 & 0.504 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.071 & 0.214 & 0.510 & 0.492 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.286 & 0.421 & 0.493 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.071 & 0.143 & 0.521 & 0.514 \\
+\texttt{ACD-v5} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.071 & 0.071 & 0.506 & 0.497 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{conformal} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.000 & 0.071 & 0.326 & 0.590 \\
+\texttt{conformal} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.000 & 0.143 & 0.318 & 0.581 \\
+\texttt{conformal} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.000 & 0.143 & 0.354 & 0.515 \\
+\texttt{conformal} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.143 & 0.214 & 0.296 & 0.495 \\
+\texttt{conformal} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.322 & 0.561 \\
+\texttt{conformal} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.214 & 0.288 & 0.534 \\
+\texttt{conformal} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.071 & 0.214 & 0.342 & 0.527 \\
+\texttt{conformal} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.000 & 0.143 & 0.357 & 0.559 \\
+\texttt{trace-cls} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.000 & 0.143 & 0.365 & 0.558 \\
+\texttt{trace-cls} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.071 & 0.071 & 0.342 & 0.609 \\
+\texttt{trace-cls} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.000 & 0.143 & 0.346 & 0.532 \\
+\texttt{trace-cls} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.143 & 0.214 & 0.342 & 0.493 \\
+\texttt{trace-cls} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.214 & 0.143 & 0.344 & 0.515 \\
+\texttt{trace-cls} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.143 & 0.322 & 0.552 \\
+\texttt{trace-cls} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.000 & 0.143 & 0.386 & 0.525 \\
+\texttt{trace-cls} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.000 & 0.071 & 0.383 & 0.568 \\
+\texttt{costmap} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.143 & 0.214 & 0.390 & 0.549 \\
+\texttt{costmap} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.071 & 0.214 & 0.373 & 0.548 \\
+\texttt{costmap} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.143 & 0.071 & 0.415 & 0.538 \\
+\texttt{costmap} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.286 & 0.214 & 0.378 & 0.501 \\
+\texttt{costmap} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.367 & 0.575 \\
+\texttt{costmap} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.143 & 0.329 & 0.572 \\
+\texttt{costmap} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.000 & 0.071 & 0.411 & 0.550 \\
+\texttt{costmap} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.397 & 0.601 \\
+\texttt{ignore} & \texttt{human-stop} & 0 & 14 & 0.643 & 0.500 & 0.214 & 0.000 & 0.404 \\
+\texttt{ignore} & \texttt{human-stop} & 1 & 14 & 0.643 & 0.357 & 0.000 & 0.000 & 0.446 \\
+\texttt{ignore} & \texttt{human-stop} & 2 & 14 & 0.500 & 0.500 & 0.000 & 0.000 & 0.365 \\
+\texttt{ignore} & \texttt{human-stop} & 3 & 14 & 0.571 & 0.429 & 0.143 & 0.000 & 0.376 \\
+\texttt{ignore} & \texttt{human-stop} & 4 & 14 & 0.643 & 0.429 & 0.143 & 0.000 & 0.434 \\
+\texttt{ignore} & \texttt{human-stop} & 5 & 14 & 0.571 & 0.500 & 0.143 & 0.000 & 0.387 \\
+\texttt{ignore} & \texttt{human-stop} & 6 & 14 & 0.500 & 0.571 & 0.357 & 0.000 & 0.337 \\
+\texttt{ignore} & \texttt{human-stop} & 7 & 14 & 0.429 & 0.571 & 0.071 & 0.000 & 0.324 \\
+\texttt{kernel-cls} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.000 & 0.071 & 0.291 & 0.620 \\
+\texttt{kernel-cls} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.000 & 0.071 & 0.307 & 0.580 \\
+\texttt{kernel-cls} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.000 & 0.071 & 0.314 & 0.540 \\
+\texttt{kernel-cls} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.000 & 0.143 & 0.290 & 0.525 \\
+\texttt{kernel-cls} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.071 & 0.143 & 0.296 & 0.575 \\
+\texttt{kernel-cls} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.071 & 0.309 & 0.537 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{kernel-cls} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.000 & 0.071 & 0.330 & 0.542 \\
+\texttt{kernel-cls} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.335 & 0.578 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 0 & 14 & 0.929 & 0.071 & 0.000 & 0.154 & 0.595 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 1 & 14 & 0.929 & 0.286 & 0.071 & 0.181 & 0.480 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 2 & 14 & 0.786 & 0.286 & 0.071 & 0.205 & 0.489 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 3 & 14 & 0.714 & 0.357 & 0.143 & 0.181 & 0.422 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 4 & 14 & 0.857 & 0.214 & 0.071 & 0.141 & 0.519 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.143 & 0.071 & 0.119 & 0.594 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 6 & 14 & 0.929 & 0.143 & 0.071 & 0.168 & 0.512 \\
+\texttt{endpoint-neg} & \texttt{human-stop} & 7 & 14 & 0.929 & 0.214 & 0.000 & 0.180 & 0.498 \\
+\texttt{oracle} & \texttt{human-stop} & 0 & 14 & 0.929 & 0.071 & 0.143 & 1.000 & 0.593 \\
+\texttt{oracle} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.000 & 0.214 & 1.000 & 0.599 \\
+\texttt{oracle} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.000 & 0.214 & 1.000 & 0.589 \\
+\texttt{oracle} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.143 & 0.214 & 1.000 & 0.576 \\
+\texttt{oracle} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.071 & 0.143 & 1.000 & 0.588 \\
+\texttt{oracle} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.143 & 1.000 & 0.608 \\
+\texttt{oracle} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.143 & 0.143 & 1.000 & 0.591 \\
+\texttt{oracle} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.635 \\
+\texttt{particle} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.000 & 0.071 & 0.363 & 0.559 \\
+\texttt{particle} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.366 & 0.574 \\
+\texttt{particle} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.071 & 0.143 & 0.376 & 0.487 \\
+\texttt{particle} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.143 & 0.143 & 0.379 & 0.453 \\
+\texttt{particle} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.355 & 0.531 \\
+\texttt{particle} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.143 & 0.340 & 0.517 \\
+\texttt{particle} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.000 & 0.071 & 0.395 & 0.521 \\
+\texttt{particle} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.000 & 0.143 & 0.389 & 0.529 \\
+\texttt{risk-filter} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.071 & 0.000 & 0.363 & 0.605 \\
+\texttt{risk-filter} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.071 & 0.000 & 0.382 & 0.547 \\
+\texttt{risk-filter} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.143 & 0.071 & 0.397 & 0.533 \\
+\texttt{risk-filter} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.286 & 0.000 & 0.369 & 0.501 \\
+\texttt{risk-filter} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.333 & 0.583 \\
+\texttt{risk-filter} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.071 & 0.071 & 0.319 & 0.545 \\
+\texttt{risk-filter} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.388 & 0.569 \\
+\texttt{risk-filter} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.071 & 0.000 & 0.392 & 0.586 \\
+\texttt{barrier-MPC} & \texttt{human-stop} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.364 & 0.554 \\
+\texttt{barrier-MPC} & \texttt{human-stop} & 1 & 14 & 1.000 & 0.000 & 0.143 & 0.340 & 0.505 \\
+\texttt{barrier-MPC} & \texttt{human-stop} & 2 & 14 & 1.000 & 0.071 & 0.071 & 0.359 & 0.507 \\
+\texttt{barrier-MPC} & \texttt{human-stop} & 3 & 14 & 1.000 & 0.071 & 0.143 & 0.361 & 0.435 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{barrier-MPC} & \texttt{human-stop} & 4 & 14 & 1.000 & 0.000 & 0.143 & 0.339 & 0.495 \\
+\texttt{barrier-MPC} & \texttt{human-stop} & 5 & 14 & 1.000 & 0.000 & 0.214 & 0.360 & 0.505 \\
+\texttt{barrier-MPC} & \texttt{human-stop} & 6 & 14 & 1.000 & 0.000 & 0.071 & 0.390 & 0.506 \\
+\texttt{barrier-MPC} & \texttt{human-stop} & 7 & 14 & 1.000 & 0.071 & 0.071 & 0.368 & 0.515 \\
+\texttt{ACD-v4} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.875 \\
+\texttt{ACD-v4} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.888 \\
+\texttt{ACD-v4} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.892 \\
+\texttt{ACD-v4} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.874 \\
+\texttt{ACD-v4} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.786 & 0.862 \\
+\texttt{ACD-v4} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.870 \\
+\texttt{ACD-v4} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.876 \\
+\texttt{ACD-v4} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.870 \\
+\texttt{ACD-v5} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.876 \\
+\texttt{ACD-v5} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.883 \\
+\texttt{ACD-v5} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.894 \\
+\texttt{ACD-v5} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.643 & 0.859 \\
+\texttt{ACD-v5} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.863 \\
+\texttt{ACD-v5} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.872 \\
+\texttt{ACD-v5} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.882 \\
+\texttt{ACD-v5} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.866 \\
+\texttt{conformal} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.846 \\
+\texttt{conformal} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.875 \\
+\texttt{conformal} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.884 \\
+\texttt{conformal} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.882 \\
+\texttt{conformal} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.865 \\
+\texttt{conformal} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.869 \\
+\texttt{conformal} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.875 \\
+\texttt{conformal} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.855 \\
+\texttt{trace-cls} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.854 \\
+\texttt{trace-cls} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.890 \\
+\texttt{trace-cls} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.889 \\
+\texttt{trace-cls} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.643 & 0.840 \\
+\texttt{trace-cls} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.786 & 0.850 \\
+\texttt{trace-cls} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.873 \\
+\texttt{trace-cls} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.880 \\
+\texttt{trace-cls} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.864 \\
+\texttt{costmap} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.875 \\
+\texttt{costmap} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.891 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{costmap} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.895 \\
+\texttt{costmap} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.875 \\
+\texttt{costmap} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.867 \\
+\texttt{costmap} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.071 & 0.571 & 0.849 \\
+\texttt{costmap} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.879 \\
+\texttt{costmap} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.860 \\
+\texttt{ignore} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.878 \\
+\texttt{ignore} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.896 \\
+\texttt{ignore} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.887 \\
+\texttt{ignore} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.886 \\
+\texttt{ignore} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.071 & 1.000 & 0.863 \\
+\texttt{ignore} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.862 \\
+\texttt{ignore} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.876 \\
+\texttt{ignore} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.865 \\
+\texttt{kernel-cls} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.071 & 0.714 & 0.830 \\
+\texttt{kernel-cls} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.882 \\
+\texttt{kernel-cls} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.881 \\
+\texttt{kernel-cls} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.643 & 0.842 \\
+\texttt{kernel-cls} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.866 \\
+\texttt{kernel-cls} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.868 \\
+\texttt{kernel-cls} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.880 \\
+\texttt{kernel-cls} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.851 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.867 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.879 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.882 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 3 & 14 & 1.000 & 0.071 & 0.071 & 0.643 & 0.842 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.786 & 0.855 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.867 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.877 \\
+\texttt{endpoint-neg} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.855 \\
+\texttt{oracle} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.071 & 1.000 & 0.861 \\
+\texttt{oracle} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.071 & 1.000 & 0.858 \\
+\texttt{oracle} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.885 \\
+\texttt{oracle} & \texttt{nominal} & 3 & 14 & 1.000 & 0.071 & 0.143 & 1.000 & 0.823 \\
+\texttt{oracle} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.875 \\
+\texttt{oracle} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.862 \\
+\texttt{oracle} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 1.000 & 0.879 \\
+\texttt{oracle} & \texttt{nominal} & 7 & 14 & 1.000 & 0.071 & 0.143 & 1.000 & 0.837 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-main} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllccccc}
+\toprule
+Method & Split & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{particle} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.845 \\
+\texttt{particle} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.873 \\
+\texttt{particle} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.889 \\
+\texttt{particle} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.870 \\
+\texttt{particle} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.855 \\
+\texttt{particle} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.847 \\
+\texttt{particle} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.878 \\
+\texttt{particle} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.842 \\
+\texttt{risk-filter} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.864 \\
+\texttt{risk-filter} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.879 \\
+\texttt{risk-filter} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.887 \\
+\texttt{risk-filter} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.071 & 0.643 & 0.844 \\
+\texttt{risk-filter} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.864 \\
+\texttt{risk-filter} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.866 \\
+\texttt{risk-filter} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.878 \\
+\texttt{risk-filter} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.858 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 0 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.844 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 1 & 14 & 1.000 & 0.000 & 0.000 & 0.857 & 0.873 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 2 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.888 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 3 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.854 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 4 & 14 & 1.000 & 0.000 & 0.071 & 0.786 & 0.835 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 5 & 14 & 1.000 & 0.000 & 0.000 & 0.571 & 0.849 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 6 & 14 & 1.000 & 0.000 & 0.000 & 0.929 & 0.885 \\
+\texttt{barrier-MPC} & \texttt{nominal} & 7 & 14 & 1.000 & 0.000 & 0.000 & 0.714 & 0.822 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+\section{Seed-Level Aggregate Metrics}
+\tiny
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:seed-agg}\textbf{Table \thetable: Seed-level aggregate metrics}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllccccc}
+\toprule
+Method & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{ACD-v4} & 0 & 56 & 0.857 & 0.196 & 0.286 & 0.422 & 0.432 \\
+\texttt{ACD-v4} & 1 & 56 & 0.946 & 0.107 & 0.232 & 0.412 & 0.469 \\
+\texttt{ACD-v4} & 2 & 56 & 0.893 & 0.143 & 0.214 & 0.422 & 0.452 \\
+\texttt{ACD-v4} & 3 & 56 & 0.911 & 0.107 & 0.321 & 0.425 & 0.432 \\
+\texttt{ACD-v4} & 4 & 56 & 0.893 & 0.179 & 0.286 & 0.438 & 0.444 \\
+\texttt{ACD-v4} & 5 & 56 & 0.911 & 0.143 & 0.250 & 0.420 & 0.450 \\
+\texttt{ACD-v4} & 6 & 56 & 0.929 & 0.196 & 0.268 & 0.434 & 0.445 \\
+\texttt{ACD-v4} & 7 & 56 & 0.893 & 0.196 & 0.375 & 0.439 & 0.442 \\
+\texttt{ACD-v5} & 0 & 56 & 0.786 & 0.125 & 0.179 & 0.395 & 0.395 \\
+\texttt{ACD-v5} & 1 & 56 & 0.821 & 0.054 & 0.107 & 0.391 & 0.433 \\
+\texttt{ACD-v5} & 2 & 56 & 0.750 & 0.089 & 0.107 & 0.403 & 0.378 \\
+\texttt{ACD-v5} & 3 & 56 & 0.821 & 0.018 & 0.071 & 0.410 & 0.390 \\
+\texttt{ACD-v5} & 4 & 56 & 0.786 & 0.054 & 0.125 & 0.418 & 0.376 \\
+\texttt{ACD-v5} & 5 & 56 & 0.821 & 0.107 & 0.179 & 0.400 & 0.408 \\
+\texttt{ACD-v5} & 6 & 56 & 0.875 & 0.036 & 0.125 & 0.409 & 0.451 \\
+\texttt{ACD-v5} & 7 & 56 & 0.875 & 0.125 & 0.232 & 0.417 & 0.425 \\
+\texttt{conformal} & 0 & 56 & 0.875 & 0.196 & 0.250 & 0.382 & 0.511 \\
+\texttt{conformal} & 1 & 56 & 0.875 & 0.214 & 0.286 & 0.358 & 0.490 \\
+\texttt{conformal} & 2 & 56 & 0.893 & 0.179 & 0.214 & 0.381 & 0.506 \\
+\texttt{conformal} & 3 & 56 & 0.911 & 0.196 & 0.268 & 0.361 & 0.501 \\
+\texttt{conformal} & 4 & 56 & 0.911 & 0.107 & 0.161 & 0.376 & 0.547 \\
+\texttt{conformal} & 5 & 56 & 0.911 & 0.179 & 0.268 & 0.372 & 0.506 \\
+\texttt{conformal} & 6 & 56 & 0.875 & 0.179 & 0.214 & 0.396 & 0.511 \\
+\texttt{conformal} & 7 & 56 & 0.893 & 0.143 & 0.179 & 0.393 & 0.536 \\
+\texttt{trace-cls} & 0 & 56 & 0.857 & 0.196 & 0.250 & 0.359 & 0.505 \\
+\texttt{trace-cls} & 1 & 56 & 0.839 & 0.232 & 0.339 & 0.336 & 0.480 \\
+\texttt{trace-cls} & 2 & 56 & 0.875 & 0.214 & 0.268 & 0.345 & 0.498 \\
+\texttt{trace-cls} & 3 & 56 & 0.857 & 0.196 & 0.304 & 0.335 & 0.492 \\
+\texttt{trace-cls} & 4 & 56 & 0.893 & 0.161 & 0.179 & 0.355 & 0.530 \\
+\texttt{trace-cls} & 5 & 56 & 0.893 & 0.179 & 0.286 & 0.354 & 0.501 \\
+\texttt{trace-cls} & 6 & 56 & 0.875 & 0.179 & 0.214 & 0.365 & 0.499 \\
+\texttt{trace-cls} & 7 & 56 & 0.911 & 0.143 & 0.125 & 0.374 & 0.547 \\
+\texttt{costmap} & 0 & 56 & 0.839 & 0.339 & 0.393 & 0.422 & 0.462 \\
+\texttt{costmap} & 1 & 56 & 0.839 & 0.357 & 0.464 & 0.397 & 0.444 \\
+\texttt{costmap} & 2 & 56 & 0.857 & 0.304 & 0.375 & 0.415 & 0.459 \\
+\texttt{costmap} & 3 & 56 & 0.857 & 0.304 & 0.339 & 0.407 & 0.485 \\
+\texttt{costmap} & 4 & 56 & 0.875 & 0.214 & 0.250 & 0.416 & 0.513 \\
+\texttt{costmap} & 5 & 56 & 0.857 & 0.286 & 0.375 & 0.397 & 0.477 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-agg} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllccccc}
+\toprule
+Method & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{costmap} & 6 & 56 & 0.875 & 0.268 & 0.250 & 0.442 & 0.494 \\
+\texttt{costmap} & 7 & 56 & 0.893 & 0.232 & 0.304 & 0.422 & 0.496 \\
+\texttt{ignore} & 0 & 56 & 0.393 & 0.696 & 0.554 & 0.000 & 0.295 \\
+\texttt{ignore} & 1 & 56 & 0.357 & 0.643 & 0.536 & 0.000 & 0.288 \\
+\texttt{ignore} & 2 & 56 & 0.321 & 0.696 & 0.518 & 0.000 & 0.273 \\
+\texttt{ignore} & 3 & 56 & 0.375 & 0.643 & 0.607 & 0.000 & 0.305 \\
+\texttt{ignore} & 4 & 56 & 0.393 & 0.643 & 0.607 & 0.000 & 0.307 \\
+\texttt{ignore} & 5 & 56 & 0.304 & 0.714 & 0.607 & 0.000 & 0.265 \\
+\texttt{ignore} & 6 & 56 & 0.357 & 0.661 & 0.571 & 0.000 & 0.303 \\
+\texttt{ignore} & 7 & 56 & 0.375 & 0.661 & 0.518 & 0.000 & 0.297 \\
+\texttt{kernel-cls} & 0 & 56 & 0.929 & 0.161 & 0.250 & 0.293 & 0.519 \\
+\texttt{kernel-cls} & 1 & 56 & 0.929 & 0.179 & 0.321 & 0.292 & 0.482 \\
+\texttt{kernel-cls} & 2 & 56 & 0.982 & 0.089 & 0.214 & 0.291 & 0.515 \\
+\texttt{kernel-cls} & 3 & 56 & 0.946 & 0.125 & 0.250 & 0.283 & 0.496 \\
+\texttt{kernel-cls} & 4 & 56 & 0.982 & 0.089 & 0.143 & 0.296 & 0.562 \\
+\texttt{kernel-cls} & 5 & 56 & 0.982 & 0.125 & 0.196 & 0.304 & 0.505 \\
+\texttt{kernel-cls} & 6 & 56 & 0.964 & 0.161 & 0.214 & 0.311 & 0.506 \\
+\texttt{kernel-cls} & 7 & 56 & 0.982 & 0.107 & 0.161 & 0.317 & 0.544 \\
+\texttt{endpoint-neg} & 0 & 56 & 0.625 & 0.429 & 0.500 & 0.246 & 0.403 \\
+\texttt{endpoint-neg} & 1 & 56 & 0.607 & 0.518 & 0.464 & 0.248 & 0.369 \\
+\texttt{endpoint-neg} & 2 & 56 & 0.571 & 0.518 & 0.446 & 0.258 & 0.385 \\
+\texttt{endpoint-neg} & 3 & 56 & 0.625 & 0.464 & 0.482 & 0.250 & 0.393 \\
+\texttt{endpoint-neg} & 4 & 56 & 0.589 & 0.464 & 0.482 & 0.227 & 0.395 \\
+\texttt{endpoint-neg} & 5 & 56 & 0.714 & 0.464 & 0.500 & 0.222 & 0.419 \\
+\texttt{endpoint-neg} & 6 & 56 & 0.679 & 0.375 & 0.375 & 0.255 & 0.446 \\
+\texttt{endpoint-neg} & 7 & 56 & 0.607 & 0.500 & 0.500 & 0.239 & 0.369 \\
+\texttt{oracle} & 0 & 56 & 0.911 & 0.143 & 0.214 & 1.000 & 0.545 \\
+\texttt{oracle} & 1 & 56 & 0.946 & 0.143 & 0.232 & 1.000 & 0.563 \\
+\texttt{oracle} & 2 & 56 & 0.982 & 0.089 & 0.214 & 1.000 & 0.564 \\
+\texttt{oracle} & 3 & 56 & 0.964 & 0.125 & 0.179 & 1.000 & 0.569 \\
+\texttt{oracle} & 4 & 56 & 0.946 & 0.107 & 0.179 & 1.000 & 0.564 \\
+\texttt{oracle} & 5 & 56 & 1.000 & 0.054 & 0.071 & 1.000 & 0.599 \\
+\texttt{oracle} & 6 & 56 & 0.982 & 0.089 & 0.125 & 1.000 & 0.574 \\
+\texttt{oracle} & 7 & 56 & 0.946 & 0.161 & 0.179 & 1.000 & 0.554 \\
+\texttt{particle} & 0 & 56 & 0.929 & 0.196 & 0.268 & 0.369 & 0.477 \\
+\texttt{particle} & 1 & 56 & 0.911 & 0.125 & 0.179 & 0.354 & 0.475 \\
+\texttt{particle} & 2 & 56 & 0.964 & 0.089 & 0.196 & 0.365 & 0.488 \\
+\texttt{particle} & 3 & 56 & 0.982 & 0.143 & 0.196 & 0.366 & 0.476 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-agg} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllccccc}
+\toprule
+Method & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{particle} & 4 & 56 & 1.000 & 0.036 & 0.071 & 0.374 & 0.540 \\
+\texttt{particle} & 5 & 56 & 1.000 & 0.071 & 0.107 & 0.371 & 0.513 \\
+\texttt{particle} & 6 & 56 & 0.946 & 0.125 & 0.179 & 0.388 & 0.484 \\
+\texttt{particle} & 7 & 56 & 0.964 & 0.071 & 0.125 & 0.388 & 0.537 \\
+\texttt{risk-filter} & 0 & 56 & 0.786 & 0.321 & 0.286 & 0.398 & 0.476 \\
+\texttt{risk-filter} & 1 & 56 & 0.857 & 0.304 & 0.321 & 0.388 & 0.465 \\
+\texttt{risk-filter} & 2 & 56 & 0.857 & 0.268 & 0.268 & 0.399 & 0.479 \\
+\texttt{risk-filter} & 3 & 56 & 0.839 & 0.286 & 0.250 & 0.390 & 0.488 \\
+\texttt{risk-filter} & 4 & 56 & 0.893 & 0.196 & 0.304 & 0.390 & 0.514 \\
+\texttt{risk-filter} & 5 & 56 & 0.857 & 0.214 & 0.321 & 0.378 & 0.499 \\
+\texttt{risk-filter} & 6 & 56 & 0.893 & 0.214 & 0.214 & 0.416 & 0.501 \\
+\texttt{risk-filter} & 7 & 56 & 0.875 & 0.268 & 0.250 & 0.405 & 0.494 \\
+\texttt{barrier-MPC} & 0 & 56 & 0.929 & 0.161 & 0.268 & 0.363 & 0.466 \\
+\texttt{barrier-MPC} & 1 & 56 & 0.946 & 0.107 & 0.321 & 0.340 & 0.456 \\
+\texttt{barrier-MPC} & 2 & 56 & 0.946 & 0.125 & 0.161 & 0.354 & 0.500 \\
+\texttt{barrier-MPC} & 3 & 56 & 0.964 & 0.143 & 0.250 & 0.354 & 0.447 \\
+\texttt{barrier-MPC} & 4 & 56 & 1.000 & 0.071 & 0.143 & 0.366 & 0.515 \\
+\texttt{barrier-MPC} & 5 & 56 & 0.964 & 0.071 & 0.143 & 0.368 & 0.503 \\
+\texttt{barrier-MPC} & 6 & 56 & 0.946 & 0.107 & 0.179 & 0.380 & 0.486 \\
+\texttt{barrier-MPC} & 7 & 56 & 0.929 & 0.107 & 0.179 & 0.376 & 0.499 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+\section{Seed-Level Ablation Metrics}
+\tiny
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:seed-ablation}\textbf{Table \thetable: Seed-level ablation metrics}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllccccc}
+\toprule
+Variant & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{endpoint} & 0 & 10 & 0.400 & 0.800 & 0.900 & 0.353 & 0.164 \\
+\texttt{endpoint} & 1 & 10 & 0.400 & 0.800 & 0.900 & 0.366 & 0.179 \\
+\texttt{endpoint} & 2 & 10 & 0.600 & 0.800 & 0.900 & 0.365 & 0.193 \\
+\texttt{endpoint} & 3 & 10 & 0.400 & 0.900 & 1.000 & 0.370 & 0.134 \\
+\texttt{endpoint} & 4 & 10 & 0.500 & 0.800 & 0.800 & 0.348 & 0.178 \\
+\texttt{endpoint} & 5 & 10 & 0.400 & 0.800 & 0.800 & 0.369 & 0.175 \\
+\texttt{endpoint} & 6 & 10 & 0.700 & 0.600 & 0.700 & 0.331 & 0.232 \\
+\texttt{endpoint} & 7 & 10 & 0.700 & 0.500 & 0.600 & 0.335 & 0.276 \\
+\texttt{full-v5} & 0 & 10 & 0.500 & 0.400 & 0.300 & 0.375 & 0.149 \\
+\texttt{full-v5} & 1 & 10 & 0.300 & 0.100 & 0.200 & 0.435 & 0.115 \\
+\texttt{full-v5} & 2 & 10 & 0.600 & 0.100 & 0.100 & 0.409 & 0.213 \\
+\texttt{full-v5} & 3 & 10 & 0.800 & 0.100 & 0.100 & 0.455 & 0.253 \\
+\texttt{full-v5} & 4 & 10 & 0.700 & 0.000 & 0.100 & 0.391 & 0.259 \\
+\texttt{full-v5} & 5 & 10 & 0.700 & 0.000 & 0.000 & 0.442 & 0.232 \\
+\texttt{full-v5} & 6 & 10 & 0.500 & 0.200 & 0.400 & 0.390 & 0.203 \\
+\texttt{full-v5} & 7 & 10 & 0.700 & 0.200 & 0.300 & 0.409 & 0.221 \\
+\texttt{no-reason} & 0 & 10 & 0.300 & 0.000 & 0.000 & 0.343 & 0.107 \\
+\texttt{no-reason} & 1 & 10 & 0.300 & 0.200 & 0.200 & 0.369 & 0.121 \\
+\texttt{no-reason} & 2 & 10 & 0.300 & 0.200 & 0.500 & 0.350 & 0.226 \\
+\texttt{no-reason} & 3 & 10 & 0.600 & 0.100 & 0.400 & 0.358 & 0.209 \\
+\texttt{no-reason} & 4 & 10 & 0.600 & 0.400 & 0.400 & 0.343 & 0.171 \\
+\texttt{no-reason} & 5 & 10 & 0.600 & 0.100 & 0.200 & 0.380 & 0.193 \\
+\texttt{no-reason} & 6 & 10 & 0.600 & 0.000 & 0.100 & 0.339 & 0.227 \\
+\texttt{no-reason} & 7 & 10 & 0.300 & 0.100 & 0.200 & 0.336 & 0.138 \\
+\texttt{no-barrier} & 0 & 10 & 0.300 & 0.300 & 0.400 & 0.379 & 0.160 \\
+\texttt{no-barrier} & 1 & 10 & 0.300 & 0.200 & 0.400 & 0.429 & 0.148 \\
+\texttt{no-barrier} & 2 & 10 & 0.600 & 0.300 & 0.200 & 0.412 & 0.239 \\
+\texttt{no-barrier} & 3 & 10 & 0.800 & 0.100 & 0.200 & 0.456 & 0.317 \\
+\texttt{no-barrier} & 4 & 10 & 0.700 & 0.300 & 0.400 & 0.401 & 0.262 \\
+\texttt{no-barrier} & 5 & 10 & 0.700 & 0.000 & 0.200 & 0.442 & 0.273 \\
+\texttt{no-barrier} & 6 & 10 & 0.600 & 0.300 & 0.300 & 0.391 & 0.231 \\
+\texttt{no-barrier} & 7 & 10 & 0.700 & 0.400 & 0.500 & 0.407 & 0.212 \\
+\texttt{no-calib} & 0 & 10 & 0.300 & 0.100 & 0.200 & 0.360 & 0.137 \\
+\texttt{no-calib} & 1 & 10 & 0.300 & 0.300 & 0.400 & 0.416 & 0.066 \\
+\texttt{no-calib} & 2 & 10 & 0.600 & 0.100 & 0.100 & 0.398 & 0.207 \\
+\texttt{no-calib} & 3 & 10 & 0.700 & 0.200 & 0.300 & 0.440 & 0.209 \\
+\texttt{no-calib} & 4 & 10 & 0.300 & 0.100 & 0.200 & 0.389 & 0.167 \\
+\texttt{no-calib} & 5 & 10 & 0.600 & 0.000 & 0.000 & 0.425 & 0.218 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-ablation} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllccccc}
+\toprule
+Variant & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{no-calib} & 6 & 10 & 0.400 & 0.300 & 0.400 & 0.376 & 0.198 \\
+\texttt{no-calib} & 7 & 10 & 0.600 & 0.200 & 0.300 & 0.399 & 0.217 \\
+\texttt{no-dyn} & 0 & 10 & 0.300 & 0.300 & 0.500 & 0.376 & 0.118 \\
+\texttt{no-dyn} & 1 & 10 & 0.300 & 0.300 & 0.400 & 0.423 & 0.123 \\
+\texttt{no-dyn} & 2 & 10 & 0.500 & 0.400 & 0.500 & 0.393 & 0.227 \\
+\texttt{no-dyn} & 3 & 10 & 0.600 & 0.400 & 0.400 & 0.424 & 0.267 \\
+\texttt{no-dyn} & 4 & 10 & 0.600 & 0.200 & 0.200 & 0.364 & 0.244 \\
+\texttt{no-dyn} & 5 & 10 & 0.700 & 0.200 & 0.200 & 0.452 & 0.246 \\
+\texttt{no-dyn} & 6 & 10 & 0.600 & 0.200 & 0.100 & 0.395 & 0.269 \\
+\texttt{no-dyn} & 7 & 10 & 0.500 & 0.500 & 0.500 & 0.392 & 0.210 \\
+\texttt{no-geom} & 0 & 10 & 0.600 & 0.700 & 0.800 & 0.408 & 0.219 \\
+\texttt{no-geom} & 1 & 10 & 0.600 & 0.500 & 0.400 & 0.390 & 0.272 \\
+\texttt{no-geom} & 2 & 10 & 0.600 & 0.700 & 0.800 & 0.405 & 0.199 \\
+\texttt{no-geom} & 3 & 10 & 0.900 & 0.400 & 0.500 & 0.384 & 0.292 \\
+\texttt{no-geom} & 4 & 10 & 0.600 & 0.700 & 0.600 & 0.370 & 0.238 \\
+\texttt{no-geom} & 5 & 10 & 0.600 & 0.600 & 0.600 & 0.442 & 0.258 \\
+\texttt{no-geom} & 6 & 10 & 0.800 & 0.300 & 0.400 & 0.376 & 0.339 \\
+\texttt{no-geom} & 7 & 10 & 0.700 & 0.600 & 0.600 & 0.378 & 0.260 \\
+\texttt{no-repeat} & 0 & 10 & 0.400 & 0.200 & 0.300 & 0.371 & 0.163 \\
+\texttt{no-repeat} & 1 & 10 & 0.400 & 0.200 & 0.300 & 0.434 & 0.147 \\
+\texttt{no-repeat} & 2 & 10 & 0.600 & 0.200 & 0.300 & 0.416 & 0.272 \\
+\texttt{no-repeat} & 3 & 10 & 0.800 & 0.300 & 0.400 & 0.454 & 0.290 \\
+\texttt{no-repeat} & 4 & 10 & 0.600 & 0.200 & 0.300 & 0.405 & 0.289 \\
+\texttt{no-repeat} & 5 & 10 & 0.700 & 0.000 & 0.000 & 0.444 & 0.299 \\
+\texttt{no-repeat} & 6 & 10 & 0.600 & 0.300 & 0.300 & 0.390 & 0.232 \\
+\texttt{no-repeat} & 7 & 10 & 0.700 & 0.300 & 0.500 & 0.421 & 0.223 \\
+\texttt{no-margin} & 0 & 10 & 0.800 & 0.200 & 0.400 & 0.413 & 0.316 \\
+\texttt{no-margin} & 1 & 10 & 0.900 & 0.200 & 0.400 & 0.435 & 0.328 \\
+\texttt{no-margin} & 2 & 10 & 0.900 & 0.400 & 0.600 & 0.441 & 0.323 \\
+\texttt{no-margin} & 3 & 10 & 0.900 & 0.400 & 0.500 & 0.492 & 0.284 \\
+\texttt{no-margin} & 4 & 10 & 0.600 & 0.500 & 0.500 & 0.436 & 0.256 \\
+\texttt{no-margin} & 5 & 10 & 1.000 & 0.100 & 0.200 & 0.460 & 0.378 \\
+\texttt{no-margin} & 6 & 10 & 0.800 & 0.600 & 0.600 & 0.411 & 0.253 \\
+\texttt{no-margin} & 7 & 10 & 0.900 & 0.100 & 0.400 & 0.438 & 0.359 \\
+\texttt{no-quant} & 0 & 10 & 0.400 & 0.300 & 0.500 & 0.372 & 0.135 \\
+\texttt{no-quant} & 1 & 10 & 0.400 & 0.100 & 0.300 & 0.429 & 0.174 \\
+\texttt{no-quant} & 2 & 10 & 0.600 & 0.200 & 0.200 & 0.409 & 0.244 \\
+\texttt{no-quant} & 3 & 10 & 0.900 & 0.200 & 0.300 & 0.455 & 0.307 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-ablation} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllccccc}
+\toprule
+Variant & Seed & Episodes & Success & Repeated & Violation & Boundary F1 & Efficiency \\
+\midrule
+\texttt{no-quant} & 4 & 10 & 0.700 & 0.200 & 0.300 & 0.400 & 0.254 \\
+\texttt{no-quant} & 5 & 10 & 0.700 & 0.000 & 0.200 & 0.442 & 0.285 \\
+\texttt{no-quant} & 6 & 10 & 0.600 & 0.300 & 0.200 & 0.393 & 0.235 \\
+\texttt{no-quant} & 7 & 10 & 0.600 & 0.300 & 0.500 & 0.409 & 0.210 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
+
+\section{Seed-Level Fixed-Risk Metrics}
+\tiny
+\setlength{\tabcolsep}{2pt}
+\begin{center}
+\refstepcounter{table}\label{tab:seed-fixed}\textbf{Table \thetable: Seed-level fixed-risk metrics}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllcccc}
+\toprule
+Method & Budget & Seed & Episodes & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{ACD-v5} & 0.08 & 0 & 8 & 0.250 & 0.500 & 0.500 & 0.063 \\
+\texttt{ACD-v5} & 0.08 & 1 & 8 & 0.500 & 0.125 & 0.500 & 0.178 \\
+\texttt{ACD-v5} & 0.08 & 2 & 8 & 0.875 & 0.125 & 0.250 & 0.281 \\
+\texttt{ACD-v5} & 0.08 & 3 & 8 & 0.500 & 0.250 & 0.250 & 0.151 \\
+\texttt{ACD-v5} & 0.08 & 4 & 8 & 0.500 & 0.000 & 0.000 & 0.145 \\
+\texttt{ACD-v5} & 0.08 & 5 & 8 & 0.125 & 0.250 & 0.125 & 0.098 \\
+\texttt{ACD-v5} & 0.08 & 6 & 8 & 0.625 & 0.125 & 0.125 & 0.207 \\
+\texttt{ACD-v5} & 0.08 & 7 & 8 & 0.375 & 0.125 & 0.375 & 0.154 \\
+\texttt{conformal} & 0.08 & 0 & 8 & 0.375 & 0.625 & 0.750 & 0.133 \\
+\texttt{conformal} & 0.08 & 1 & 8 & 0.375 & 0.875 & 0.750 & 0.110 \\
+\texttt{conformal} & 0.08 & 2 & 8 & 0.875 & 0.250 & 0.250 & 0.278 \\
+\texttt{conformal} & 0.08 & 3 & 8 & 0.500 & 0.500 & 0.625 & 0.205 \\
+\texttt{conformal} & 0.08 & 4 & 8 & 0.625 & 0.500 & 0.500 & 0.217 \\
+\texttt{conformal} & 0.08 & 5 & 8 & 0.750 & 0.250 & 0.375 & 0.292 \\
+\texttt{conformal} & 0.08 & 6 & 8 & 0.750 & 0.500 & 0.500 & 0.222 \\
+\texttt{conformal} & 0.08 & 7 & 8 & 0.875 & 0.375 & 0.500 & 0.283 \\
+\texttt{trace-cls} & 0.08 & 0 & 8 & 0.625 & 0.625 & 0.750 & 0.167 \\
+\texttt{trace-cls} & 0.08 & 1 & 8 & 0.625 & 0.875 & 0.875 & 0.135 \\
+\texttt{trace-cls} & 0.08 & 2 & 8 & 0.750 & 0.375 & 0.625 & 0.236 \\
+\texttt{trace-cls} & 0.08 & 3 & 8 & 0.625 & 0.500 & 0.625 & 0.204 \\
+\texttt{trace-cls} & 0.08 & 4 & 8 & 0.750 & 0.500 & 0.500 & 0.211 \\
+\texttt{trace-cls} & 0.08 & 5 & 8 & 0.750 & 0.625 & 0.500 & 0.238 \\
+\texttt{trace-cls} & 0.08 & 6 & 8 & 0.750 & 0.500 & 0.625 & 0.216 \\
+\texttt{trace-cls} & 0.08 & 7 & 8 & 0.875 & 0.375 & 0.500 & 0.267 \\
+\texttt{kernel-cls} & 0.08 & 0 & 8 & 0.625 & 0.625 & 0.500 & 0.136 \\
+\texttt{kernel-cls} & 0.08 & 1 & 8 & 0.750 & 0.625 & 0.625 & 0.159 \\
+\texttt{kernel-cls} & 0.08 & 2 & 8 & 0.750 & 0.250 & 0.250 & 0.235 \\
+\texttt{kernel-cls} & 0.08 & 3 & 8 & 0.875 & 0.500 & 0.500 & 0.239 \\
+\texttt{kernel-cls} & 0.08 & 4 & 8 & 1.000 & 0.375 & 0.375 & 0.250 \\
+\texttt{kernel-cls} & 0.08 & 5 & 8 & 0.750 & 0.250 & 0.250 & 0.281 \\
+\texttt{kernel-cls} & 0.08 & 6 & 8 & 0.750 & 0.625 & 0.750 & 0.213 \\
+\texttt{kernel-cls} & 0.08 & 7 & 8 & 1.000 & 0.375 & 0.375 & 0.262 \\
+\texttt{oracle} & 0.08 & 0 & 8 & 0.750 & 0.375 & 0.375 & 0.272 \\
+\texttt{oracle} & 0.08 & 1 & 8 & 0.875 & 0.125 & 0.250 & 0.313 \\
+\texttt{oracle} & 0.08 & 2 & 8 & 0.500 & 0.750 & 0.750 & 0.169 \\
+\texttt{oracle} & 0.08 & 3 & 8 & 0.750 & 0.250 & 0.375 & 0.263 \\
+\texttt{oracle} & 0.08 & 4 & 8 & 0.875 & 0.250 & 0.250 & 0.317 \\
+\texttt{oracle} & 0.08 & 5 & 8 & 0.750 & 0.375 & 0.375 & 0.290 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-fixed} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllcccc}
+\toprule
+Method & Budget & Seed & Episodes & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{oracle} & 0.08 & 6 & 8 & 1.000 & 0.125 & 0.125 & 0.366 \\
+\texttt{oracle} & 0.08 & 7 & 8 & 0.875 & 0.250 & 0.250 & 0.301 \\
+\texttt{particle} & 0.08 & 0 & 8 & 0.750 & 0.625 & 0.875 & 0.148 \\
+\texttt{particle} & 0.08 & 1 & 8 & 1.000 & 0.000 & 0.250 & 0.301 \\
+\texttt{particle} & 0.08 & 2 & 8 & 0.875 & 0.125 & 0.125 & 0.297 \\
+\texttt{particle} & 0.08 & 3 & 8 & 0.875 & 0.375 & 0.500 & 0.241 \\
+\texttt{particle} & 0.08 & 4 & 8 & 0.875 & 0.375 & 0.375 & 0.245 \\
+\texttt{particle} & 0.08 & 5 & 8 & 1.000 & 0.125 & 0.125 & 0.329 \\
+\texttt{particle} & 0.08 & 6 & 8 & 0.875 & 0.375 & 0.250 & 0.269 \\
+\texttt{particle} & 0.08 & 7 & 8 & 1.000 & 0.375 & 0.500 & 0.256 \\
+\texttt{risk-filter} & 0.08 & 0 & 8 & 0.500 & 0.875 & 0.875 & 0.126 \\
+\texttt{risk-filter} & 0.08 & 1 & 8 & 0.625 & 0.750 & 0.750 & 0.159 \\
+\texttt{risk-filter} & 0.08 & 2 & 8 & 0.500 & 0.750 & 0.875 & 0.147 \\
+\texttt{risk-filter} & 0.08 & 3 & 8 & 0.500 & 0.875 & 0.875 & 0.133 \\
+\texttt{risk-filter} & 0.08 & 4 & 8 & 0.500 & 0.875 & 0.875 & 0.139 \\
+\texttt{risk-filter} & 0.08 & 5 & 8 & 0.375 & 0.750 & 0.750 & 0.164 \\
+\texttt{risk-filter} & 0.08 & 6 & 8 & 0.625 & 0.750 & 0.750 & 0.194 \\
+\texttt{risk-filter} & 0.08 & 7 & 8 & 0.750 & 0.500 & 0.625 & 0.219 \\
+\texttt{barrier-MPC} & 0.08 & 0 & 8 & 0.750 & 0.375 & 0.500 & 0.174 \\
+\texttt{barrier-MPC} & 0.08 & 1 & 8 & 1.000 & 0.000 & 0.125 & 0.281 \\
+\texttt{barrier-MPC} & 0.08 & 2 & 8 & 0.875 & 0.125 & 0.125 & 0.284 \\
+\texttt{barrier-MPC} & 0.08 & 3 & 8 & 0.875 & 0.250 & 0.375 & 0.253 \\
+\texttt{barrier-MPC} & 0.08 & 4 & 8 & 0.875 & 0.250 & 0.250 & 0.251 \\
+\texttt{barrier-MPC} & 0.08 & 5 & 8 & 1.000 & 0.125 & 0.375 & 0.293 \\
+\texttt{barrier-MPC} & 0.08 & 6 & 8 & 1.000 & 0.500 & 0.625 & 0.250 \\
+\texttt{barrier-MPC} & 0.08 & 7 & 8 & 1.000 & 0.375 & 0.375 & 0.269 \\
+\texttt{ACD-v5} & 0.12 & 0 & 8 & 0.250 & 0.250 & 0.250 & 0.132 \\
+\texttt{ACD-v5} & 0.12 & 1 & 8 & 0.500 & 0.125 & 0.250 & 0.140 \\
+\texttt{ACD-v5} & 0.12 & 2 & 8 & 1.000 & 0.125 & 0.250 & 0.260 \\
+\texttt{ACD-v5} & 0.12 & 3 & 8 & 0.750 & 0.000 & 0.125 & 0.243 \\
+\texttt{ACD-v5} & 0.12 & 4 & 8 & 0.625 & 0.250 & 0.250 & 0.180 \\
+\texttt{ACD-v5} & 0.12 & 5 & 8 & 0.375 & 0.250 & 0.375 & 0.117 \\
+\texttt{ACD-v5} & 0.12 & 6 & 8 & 0.375 & 0.250 & 0.375 & 0.208 \\
+\texttt{ACD-v5} & 0.12 & 7 & 8 & 0.500 & 0.000 & 0.000 & 0.124 \\
+\texttt{conformal} & 0.12 & 0 & 8 & 0.750 & 0.375 & 0.375 & 0.278 \\
+\texttt{conformal} & 0.12 & 1 & 8 & 0.750 & 0.250 & 0.250 & 0.312 \\
+\texttt{conformal} & 0.12 & 2 & 8 & 0.875 & 0.375 & 0.625 & 0.258 \\
+\texttt{conformal} & 0.12 & 3 & 8 & 1.000 & 0.000 & 0.125 & 0.372 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-fixed} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllcccc}
+\toprule
+Method & Budget & Seed & Episodes & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{conformal} & 0.12 & 4 & 8 & 0.750 & 0.375 & 0.375 & 0.300 \\
+\texttt{conformal} & 0.12 & 5 & 8 & 0.750 & 0.375 & 0.500 & 0.275 \\
+\texttt{conformal} & 0.12 & 6 & 8 & 0.750 & 0.250 & 0.250 & 0.307 \\
+\texttt{conformal} & 0.12 & 7 & 8 & 0.750 & 0.250 & 0.375 & 0.270 \\
+\texttt{trace-cls} & 0.12 & 0 & 8 & 0.875 & 0.375 & 0.500 & 0.280 \\
+\texttt{trace-cls} & 0.12 & 1 & 8 & 0.875 & 0.375 & 0.375 & 0.272 \\
+\texttt{trace-cls} & 0.12 & 2 & 8 & 0.875 & 0.125 & 0.375 & 0.288 \\
+\texttt{trace-cls} & 0.12 & 3 & 8 & 1.000 & 0.125 & 0.125 & 0.352 \\
+\texttt{trace-cls} & 0.12 & 4 & 8 & 0.625 & 0.375 & 0.500 & 0.256 \\
+\texttt{trace-cls} & 0.12 & 5 & 8 & 0.625 & 0.375 & 0.500 & 0.266 \\
+\texttt{trace-cls} & 0.12 & 6 & 8 & 0.750 & 0.375 & 0.375 & 0.269 \\
+\texttt{trace-cls} & 0.12 & 7 & 8 & 0.750 & 0.375 & 0.375 & 0.248 \\
+\texttt{kernel-cls} & 0.12 & 0 & 8 & 1.000 & 0.125 & 0.250 & 0.300 \\
+\texttt{kernel-cls} & 0.12 & 1 & 8 & 1.000 & 0.000 & 0.250 & 0.297 \\
+\texttt{kernel-cls} & 0.12 & 2 & 8 & 0.625 & 0.625 & 0.625 & 0.180 \\
+\texttt{kernel-cls} & 0.12 & 3 & 8 & 1.000 & 0.125 & 0.250 & 0.293 \\
+\texttt{kernel-cls} & 0.12 & 4 & 8 & 1.000 & 0.125 & 0.125 & 0.348 \\
+\texttt{kernel-cls} & 0.12 & 5 & 8 & 0.625 & 0.375 & 0.375 & 0.225 \\
+\texttt{kernel-cls} & 0.12 & 6 & 8 & 1.000 & 0.250 & 0.250 & 0.300 \\
+\texttt{kernel-cls} & 0.12 & 7 & 8 & 0.500 & 0.625 & 0.750 & 0.142 \\
+\texttt{oracle} & 0.12 & 0 & 8 & 1.000 & 0.375 & 0.625 & 0.273 \\
+\texttt{oracle} & 0.12 & 1 & 8 & 0.750 & 0.375 & 0.375 & 0.269 \\
+\texttt{oracle} & 0.12 & 2 & 8 & 1.000 & 0.250 & 0.375 & 0.319 \\
+\texttt{oracle} & 0.12 & 3 & 8 & 1.000 & 0.125 & 0.125 & 0.392 \\
+\texttt{oracle} & 0.12 & 4 & 8 & 1.000 & 0.000 & 0.000 & 0.398 \\
+\texttt{oracle} & 0.12 & 5 & 8 & 1.000 & 0.000 & 0.125 & 0.376 \\
+\texttt{oracle} & 0.12 & 6 & 8 & 0.750 & 0.375 & 0.500 & 0.272 \\
+\texttt{oracle} & 0.12 & 7 & 8 & 0.750 & 0.375 & 0.500 & 0.278 \\
+\texttt{particle} & 0.12 & 0 & 8 & 0.875 & 0.250 & 0.250 & 0.289 \\
+\texttt{particle} & 0.12 & 1 & 8 & 1.000 & 0.250 & 0.250 & 0.292 \\
+\texttt{particle} & 0.12 & 2 & 8 & 0.750 & 0.500 & 0.500 & 0.241 \\
+\texttt{particle} & 0.12 & 3 & 8 & 0.875 & 0.125 & 0.250 & 0.328 \\
+\texttt{particle} & 0.12 & 4 & 8 & 0.875 & 0.125 & 0.250 & 0.304 \\
+\texttt{particle} & 0.12 & 5 & 8 & 0.750 & 0.375 & 0.375 & 0.280 \\
+\texttt{particle} & 0.12 & 6 & 8 & 1.000 & 0.125 & 0.125 & 0.332 \\
+\texttt{particle} & 0.12 & 7 & 8 & 0.875 & 0.125 & 0.125 & 0.279 \\
+\texttt{risk-filter} & 0.12 & 0 & 8 & 0.750 & 0.750 & 0.875 & 0.195 \\
+\texttt{risk-filter} & 0.12 & 1 & 8 & 0.625 & 0.500 & 0.500 & 0.235 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-fixed} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllcccc}
+\toprule
+Method & Budget & Seed & Episodes & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{risk-filter} & 0.12 & 2 & 8 & 0.625 & 0.625 & 0.875 & 0.197 \\
+\texttt{risk-filter} & 0.12 & 3 & 8 & 0.625 & 0.625 & 0.750 & 0.219 \\
+\texttt{risk-filter} & 0.12 & 4 & 8 & 0.750 & 0.500 & 0.625 & 0.270 \\
+\texttt{risk-filter} & 0.12 & 5 & 8 & 0.750 & 0.500 & 0.750 & 0.228 \\
+\texttt{risk-filter} & 0.12 & 6 & 8 & 0.875 & 0.875 & 0.750 & 0.197 \\
+\texttt{risk-filter} & 0.12 & 7 & 8 & 0.375 & 0.625 & 0.625 & 0.191 \\
+\texttt{barrier-MPC} & 0.12 & 0 & 8 & 1.000 & 0.250 & 0.375 & 0.297 \\
+\texttt{barrier-MPC} & 0.12 & 1 & 8 & 0.875 & 0.250 & 0.375 & 0.283 \\
+\texttt{barrier-MPC} & 0.12 & 2 & 8 & 0.875 & 0.375 & 0.375 & 0.248 \\
+\texttt{barrier-MPC} & 0.12 & 3 & 8 & 1.000 & 0.125 & 0.125 & 0.339 \\
+\texttt{barrier-MPC} & 0.12 & 4 & 8 & 0.875 & 0.250 & 0.250 & 0.297 \\
+\texttt{barrier-MPC} & 0.12 & 5 & 8 & 1.000 & 0.125 & 0.125 & 0.340 \\
+\texttt{barrier-MPC} & 0.12 & 6 & 8 & 1.000 & 0.000 & 0.125 & 0.334 \\
+\texttt{barrier-MPC} & 0.12 & 7 & 8 & 0.875 & 0.125 & 0.125 & 0.292 \\
+\texttt{ACD-v5} & 0.18 & 0 & 8 & 0.500 & 0.375 & 0.500 & 0.212 \\
+\texttt{ACD-v5} & 0.18 & 1 & 8 & 0.500 & 0.000 & 0.125 & 0.191 \\
+\texttt{ACD-v5} & 0.18 & 2 & 8 & 0.375 & 0.125 & 0.125 & 0.140 \\
+\texttt{ACD-v5} & 0.18 & 3 & 8 & 0.250 & 0.250 & 0.500 & 0.082 \\
+\texttt{ACD-v5} & 0.18 & 4 & 8 & 0.625 & 0.250 & 0.125 & 0.191 \\
+\texttt{ACD-v5} & 0.18 & 5 & 8 & 0.625 & 0.375 & 0.375 & 0.194 \\
+\texttt{ACD-v5} & 0.18 & 6 & 8 & 0.750 & 0.125 & 0.375 & 0.257 \\
+\texttt{ACD-v5} & 0.18 & 7 & 8 & 0.375 & 0.250 & 0.250 & 0.120 \\
+\texttt{conformal} & 0.18 & 0 & 8 & 0.500 & 0.500 & 0.625 & 0.192 \\
+\texttt{conformal} & 0.18 & 1 & 8 & 0.875 & 0.625 & 0.625 & 0.228 \\
+\texttt{conformal} & 0.18 & 2 & 8 & 0.750 & 0.375 & 0.500 & 0.283 \\
+\texttt{conformal} & 0.18 & 3 & 8 & 0.750 & 0.250 & 0.250 & 0.301 \\
+\texttt{conformal} & 0.18 & 4 & 8 & 0.750 & 0.375 & 0.375 & 0.260 \\
+\texttt{conformal} & 0.18 & 5 & 8 & 0.500 & 0.625 & 0.750 & 0.162 \\
+\texttt{conformal} & 0.18 & 6 & 8 & 0.625 & 0.500 & 0.500 & 0.240 \\
+\texttt{conformal} & 0.18 & 7 & 8 & 1.000 & 0.500 & 0.500 & 0.284 \\
+\texttt{trace-cls} & 0.18 & 0 & 8 & 0.625 & 0.500 & 0.625 & 0.206 \\
+\texttt{trace-cls} & 0.18 & 1 & 8 & 0.625 & 0.750 & 0.750 & 0.188 \\
+\texttt{trace-cls} & 0.18 & 2 & 8 & 0.750 & 0.250 & 0.250 & 0.307 \\
+\texttt{trace-cls} & 0.18 & 3 & 8 & 0.750 & 0.250 & 0.250 & 0.305 \\
+\texttt{trace-cls} & 0.18 & 4 & 8 & 0.750 & 0.250 & 0.250 & 0.300 \\
+\texttt{trace-cls} & 0.18 & 5 & 8 & 0.375 & 0.750 & 0.875 & 0.113 \\
+\texttt{trace-cls} & 0.18 & 6 & 8 & 0.750 & 0.625 & 0.500 & 0.241 \\
+\texttt{trace-cls} & 0.18 & 7 & 8 & 0.625 & 0.625 & 0.500 & 0.241 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-fixed} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllcccc}
+\toprule
+Method & Budget & Seed & Episodes & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{kernel-cls} & 0.18 & 0 & 8 & 0.875 & 0.500 & 0.500 & 0.212 \\
+\texttt{kernel-cls} & 0.18 & 1 & 8 & 0.875 & 0.125 & 0.500 & 0.274 \\
+\texttt{kernel-cls} & 0.18 & 2 & 8 & 1.000 & 0.125 & 0.250 & 0.339 \\
+\texttt{kernel-cls} & 0.18 & 3 & 8 & 0.875 & 0.250 & 0.250 & 0.294 \\
+\texttt{kernel-cls} & 0.18 & 4 & 8 & 1.000 & 0.125 & 0.375 & 0.298 \\
+\texttt{kernel-cls} & 0.18 & 5 & 8 & 0.875 & 0.625 & 0.750 & 0.160 \\
+\texttt{kernel-cls} & 0.18 & 6 & 8 & 0.875 & 0.375 & 0.625 & 0.233 \\
+\texttt{kernel-cls} & 0.18 & 7 & 8 & 0.750 & 0.250 & 0.375 & 0.274 \\
+\texttt{oracle} & 0.18 & 0 & 8 & 0.875 & 0.125 & 0.125 & 0.348 \\
+\texttt{oracle} & 0.18 & 1 & 8 & 0.875 & 0.250 & 0.250 & 0.333 \\
+\texttt{oracle} & 0.18 & 2 & 8 & 1.000 & 0.375 & 0.375 & 0.290 \\
+\texttt{oracle} & 0.18 & 3 & 8 & 0.875 & 0.125 & 0.125 & 0.363 \\
+\texttt{oracle} & 0.18 & 4 & 8 & 0.875 & 0.250 & 0.250 & 0.294 \\
+\texttt{oracle} & 0.18 & 5 & 8 & 0.875 & 0.125 & 0.125 & 0.338 \\
+\texttt{oracle} & 0.18 & 6 & 8 & 0.875 & 0.125 & 0.375 & 0.310 \\
+\texttt{oracle} & 0.18 & 7 & 8 & 1.000 & 0.000 & 0.000 & 0.407 \\
+\texttt{particle} & 0.18 & 0 & 8 & 0.875 & 0.500 & 0.500 & 0.239 \\
+\texttt{particle} & 0.18 & 1 & 8 & 0.875 & 0.500 & 0.750 & 0.203 \\
+\texttt{particle} & 0.18 & 2 & 8 & 1.000 & 0.125 & 0.125 & 0.363 \\
+\texttt{particle} & 0.18 & 3 & 8 & 0.875 & 0.250 & 0.250 & 0.282 \\
+\texttt{particle} & 0.18 & 4 & 8 & 1.000 & 0.125 & 0.125 & 0.323 \\
+\texttt{particle} & 0.18 & 5 & 8 & 0.875 & 0.375 & 0.500 & 0.217 \\
+\texttt{particle} & 0.18 & 6 & 8 & 1.000 & 0.375 & 0.375 & 0.269 \\
+\texttt{particle} & 0.18 & 7 & 8 & 1.000 & 0.250 & 0.500 & 0.280 \\
+\texttt{risk-filter} & 0.18 & 0 & 8 & 0.500 & 0.750 & 1.000 & 0.144 \\
+\texttt{risk-filter} & 0.18 & 1 & 8 & 0.500 & 0.500 & 0.750 & 0.199 \\
+\texttt{risk-filter} & 0.18 & 2 & 8 & 0.750 & 0.500 & 0.500 & 0.267 \\
+\texttt{risk-filter} & 0.18 & 3 & 8 & 0.625 & 0.750 & 0.750 & 0.174 \\
+\texttt{risk-filter} & 0.18 & 4 & 8 & 0.625 & 0.625 & 0.750 & 0.216 \\
+\texttt{risk-filter} & 0.18 & 5 & 8 & 0.625 & 0.625 & 0.750 & 0.178 \\
+\texttt{risk-filter} & 0.18 & 6 & 8 & 0.500 & 0.750 & 0.750 & 0.160 \\
+\texttt{risk-filter} & 0.18 & 7 & 8 & 0.625 & 0.625 & 0.625 & 0.217 \\
+\texttt{barrier-MPC} & 0.18 & 0 & 8 & 0.750 & 0.625 & 0.625 & 0.209 \\
+\texttt{barrier-MPC} & 0.18 & 1 & 8 & 0.875 & 0.375 & 0.375 & 0.252 \\
+\texttt{barrier-MPC} & 0.18 & 2 & 8 & 1.000 & 0.125 & 0.250 & 0.341 \\
+\texttt{barrier-MPC} & 0.18 & 3 & 8 & 0.875 & 0.125 & 0.250 & 0.287 \\
+\texttt{barrier-MPC} & 0.18 & 4 & 8 & 0.875 & 0.250 & 0.375 & 0.264 \\
+\texttt{barrier-MPC} & 0.18 & 5 & 8 & 1.000 & 0.250 & 0.375 & 0.268 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-fixed} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllcccc}
+\toprule
+Method & Budget & Seed & Episodes & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{barrier-MPC} & 0.18 & 6 & 8 & 0.750 & 0.375 & 0.375 & 0.242 \\
+\texttt{barrier-MPC} & 0.18 & 7 & 8 & 1.000 & 0.125 & 0.375 & 0.319 \\
+\texttt{ACD-v5} & 0.25 & 0 & 8 & 0.625 & 0.250 & 0.250 & 0.160 \\
+\texttt{ACD-v5} & 0.25 & 1 & 8 & 0.500 & 0.250 & 0.375 & 0.125 \\
+\texttt{ACD-v5} & 0.25 & 2 & 8 & 0.500 & 0.250 & 0.250 & 0.182 \\
+\texttt{ACD-v5} & 0.25 & 3 & 8 & 0.750 & 0.375 & 0.250 & 0.237 \\
+\texttt{ACD-v5} & 0.25 & 4 & 8 & 0.375 & 0.250 & 0.500 & 0.125 \\
+\texttt{ACD-v5} & 0.25 & 5 & 8 & 0.500 & 0.000 & 0.000 & 0.199 \\
+\texttt{ACD-v5} & 0.25 & 6 & 8 & 0.500 & 0.250 & 0.500 & 0.169 \\
+\texttt{ACD-v5} & 0.25 & 7 & 8 & 0.000 & 0.250 & 0.125 & 0.062 \\
+\texttt{conformal} & 0.25 & 0 & 8 & 0.625 & 0.375 & 0.375 & 0.251 \\
+\texttt{conformal} & 0.25 & 1 & 8 & 0.750 & 0.500 & 0.500 & 0.254 \\
+\texttt{conformal} & 0.25 & 2 & 8 & 0.625 & 0.500 & 0.625 & 0.213 \\
+\texttt{conformal} & 0.25 & 3 & 8 & 0.625 & 0.500 & 0.375 & 0.266 \\
+\texttt{conformal} & 0.25 & 4 & 8 & 0.500 & 0.625 & 0.750 & 0.192 \\
+\texttt{conformal} & 0.25 & 5 & 8 & 0.875 & 0.500 & 0.500 & 0.269 \\
+\texttt{conformal} & 0.25 & 6 & 8 & 0.250 & 0.750 & 0.750 & 0.153 \\
+\texttt{conformal} & 0.25 & 7 & 8 & 0.625 & 0.500 & 0.625 & 0.227 \\
+\texttt{trace-cls} & 0.25 & 0 & 8 & 0.625 & 0.500 & 0.500 & 0.243 \\
+\texttt{trace-cls} & 0.25 & 1 & 8 & 0.625 & 0.500 & 0.500 & 0.228 \\
+\texttt{trace-cls} & 0.25 & 2 & 8 & 0.500 & 0.500 & 0.500 & 0.212 \\
+\texttt{trace-cls} & 0.25 & 3 & 8 & 0.750 & 0.250 & 0.250 & 0.310 \\
+\texttt{trace-cls} & 0.25 & 4 & 8 & 0.625 & 0.500 & 0.500 & 0.227 \\
+\texttt{trace-cls} & 0.25 & 5 & 8 & 0.500 & 0.750 & 0.750 & 0.155 \\
+\texttt{trace-cls} & 0.25 & 6 & 8 & 0.250 & 0.750 & 0.750 & 0.158 \\
+\texttt{trace-cls} & 0.25 & 7 & 8 & 0.500 & 0.500 & 0.500 & 0.242 \\
+\texttt{kernel-cls} & 0.25 & 0 & 8 & 0.875 & 0.375 & 0.500 & 0.239 \\
+\texttt{kernel-cls} & 0.25 & 1 & 8 & 1.000 & 0.125 & 0.125 & 0.348 \\
+\texttt{kernel-cls} & 0.25 & 2 & 8 & 0.875 & 0.125 & 0.250 & 0.290 \\
+\texttt{kernel-cls} & 0.25 & 3 & 8 & 0.750 & 0.375 & 0.375 & 0.291 \\
+\texttt{kernel-cls} & 0.25 & 4 & 8 & 0.375 & 0.750 & 0.750 & 0.147 \\
+\texttt{kernel-cls} & 0.25 & 5 & 8 & 0.875 & 0.250 & 0.375 & 0.257 \\
+\texttt{kernel-cls} & 0.25 & 6 & 8 & 0.625 & 0.625 & 0.750 & 0.180 \\
+\texttt{kernel-cls} & 0.25 & 7 & 8 & 0.875 & 0.375 & 0.375 & 0.269 \\
+\texttt{oracle} & 0.25 & 0 & 8 & 0.625 & 0.375 & 0.375 & 0.255 \\
+\texttt{oracle} & 0.25 & 1 & 8 & 1.000 & 0.375 & 0.375 & 0.336 \\
+\texttt{oracle} & 0.25 & 2 & 8 & 0.750 & 0.375 & 0.625 & 0.242 \\
+\texttt{oracle} & 0.25 & 3 & 8 & 0.875 & 0.125 & 0.125 & 0.357 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\begin{center}
+\textbf{Table \ref{tab:seed-fixed} continued}\\[0.4ex]
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llllcccc}
+\toprule
+Method & Budget & Seed & Episodes & Success & Repeated & Violation & Efficiency \\
+\midrule
+\texttt{oracle} & 0.25 & 4 & 8 & 0.750 & 0.375 & 0.375 & 0.303 \\
+\texttt{oracle} & 0.25 & 5 & 8 & 1.000 & 0.125 & 0.125 & 0.358 \\
+\texttt{oracle} & 0.25 & 6 & 8 & 0.625 & 0.375 & 0.500 & 0.296 \\
+\texttt{oracle} & 0.25 & 7 & 8 & 0.750 & 0.375 & 0.375 & 0.275 \\
+\texttt{particle} & 0.25 & 0 & 8 & 0.875 & 0.250 & 0.250 & 0.281 \\
+\texttt{particle} & 0.25 & 1 & 8 & 0.750 & 0.375 & 0.500 & 0.264 \\
+\texttt{particle} & 0.25 & 2 & 8 & 1.000 & 0.125 & 0.125 & 0.329 \\
+\texttt{particle} & 0.25 & 3 & 8 & 0.625 & 0.375 & 0.500 & 0.262 \\
+\texttt{particle} & 0.25 & 4 & 8 & 0.625 & 0.625 & 0.625 & 0.212 \\
+\texttt{particle} & 0.25 & 5 & 8 & 1.000 & 0.125 & 0.250 & 0.334 \\
+\texttt{particle} & 0.25 & 6 & 8 & 0.625 & 0.500 & 0.750 & 0.192 \\
+\texttt{particle} & 0.25 & 7 & 8 & 1.000 & 0.125 & 0.125 & 0.326 \\
+\texttt{risk-filter} & 0.25 & 0 & 8 & 0.375 & 0.750 & 0.750 & 0.156 \\
+\texttt{risk-filter} & 0.25 & 1 & 8 & 0.625 & 0.500 & 0.625 & 0.239 \\
+\texttt{risk-filter} & 0.25 & 2 & 8 & 0.125 & 1.000 & 1.000 & 0.076 \\
+\texttt{risk-filter} & 0.25 & 3 & 8 & 0.625 & 0.500 & 0.500 & 0.233 \\
+\texttt{risk-filter} & 0.25 & 4 & 8 & 0.500 & 0.750 & 0.750 & 0.160 \\
+\texttt{risk-filter} & 0.25 & 5 & 8 & 0.625 & 0.500 & 0.625 & 0.194 \\
+\texttt{risk-filter} & 0.25 & 6 & 8 & 0.500 & 0.750 & 0.750 & 0.180 \\
+\texttt{risk-filter} & 0.25 & 7 & 8 & 0.375 & 0.625 & 0.625 & 0.189 \\
+\texttt{barrier-MPC} & 0.25 & 0 & 8 & 0.750 & 0.375 & 0.500 & 0.239 \\
+\texttt{barrier-MPC} & 0.25 & 1 & 8 & 1.000 & 0.125 & 0.250 & 0.303 \\
+\texttt{barrier-MPC} & 0.25 & 2 & 8 & 1.000 & 0.250 & 0.250 & 0.305 \\
+\texttt{barrier-MPC} & 0.25 & 3 & 8 & 0.750 & 0.250 & 0.250 & 0.295 \\
+\texttt{barrier-MPC} & 0.25 & 4 & 8 & 0.750 & 0.250 & 0.375 & 0.271 \\
+\texttt{barrier-MPC} & 0.25 & 5 & 8 & 0.875 & 0.125 & 0.250 & 0.333 \\
+\texttt{barrier-MPC} & 0.25 & 6 & 8 & 0.750 & 0.500 & 0.875 & 0.199 \\
+\texttt{barrier-MPC} & 0.25 & 7 & 8 & 1.000 & 0.250 & 0.250 & 0.325 \\
+\bottomrule
+\end{tabular}%
+}
+\end{center}
+\normalsize
 
 \bibliographystyle{iclr2026_conference}
 \bibliography{references}

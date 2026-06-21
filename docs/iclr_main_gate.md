@@ -1,14 +1,17 @@
 # ICLR Main Gate
 
-Gate status: STRONG_REVISE.
+Gate status: KILL_ARCHIVE.
 
-The v4 rebuild clears the local empirical gate: the proposed method beats all non-oracle baselines on the decisive `combined_abort_stress` split with seven seeds, paired statistics, ablations, and stress sweeps.
+The v5 expanded audit does not clear the local empirical gate. The proposed ACD-v5 method improves some safety-side metrics, but the strongest hostile non-oracle baselines achieve much higher closed-loop success under the frozen protocol.
 
-It does not clear the ICLR-main submission gate because:
+Fatal local failures:
 
-- The benchmark is local and diagnostic, not an accepted external robotics benchmark.
-- No real robot experiments are present.
-- The baselines are implemented planning systems, but not large learned robotic policy stacks.
-- The related-work synthesis is still based primarily on the local hostile pool rather than a full manual literature audit.
+- `robust_barrier_mpc` beats ACD-v5 on the decisive `combined_abort_stress` split: 0.884 versus 0.545 success.
+- Aggregate hard-regime success is 0.962 for the strongest baselines versus 0.817 for ACD-v5.
+- Fixed-risk checks fail at all four predefined budgets.
+- Maximum-stress success is 0.406 for ACD-v5 versus 0.734 for the best non-oracle method.
+- Several ablations match the full v5 method, so component necessity is not established.
 
-Required action before submission: external validation plus a stronger manual related-work pass.
+Independent ICLR-readiness blockers also remain: no hardware validation, no accepted external robotics benchmark validation, no learned-policy stack comparison, and no full manual related-work synthesis.
+
+Required action before any revival: redesign the method and rerun the frozen hostile protocol. Do not submit this paper to ICLR main in its current form.
